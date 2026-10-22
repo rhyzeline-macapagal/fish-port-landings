@@ -2,15 +2,18 @@
 
 import Image from "next/image";
 import Link from "next/link";
+import { useState } from "react";
 import { usePathname } from "next/navigation";
-import { LayoutDashboard, ClipboardList, Plus, LogOut, Store, type LucideIcon } from "lucide-react";
+import { LayoutDashboard, ClipboardList, Plus, LogOut, Store, CircleParking, ChevronDown, type LucideIcon } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { useEntryModal } from "@/context/EntryModalContext";
 import type { Role } from "@/lib/api";
+import { TENANT_GROUPS } from "@/lib/tenant-groups";
 
 const NAV: { href: string; label: string; short: string; icon: LucideIcon; roles: Role[] }[] = [
   { href: "/dashboard", label: "Dashboard", short: "Dashboard", icon: LayoutDashboard, roles: ["admin", "encoder", "viewer"] },
   { href: "/landings", label: "Landings", short: "Landings", icon: ClipboardList, roles: ["admin", "encoder"] },
+  { href: "/parking", label: "Parking Collection", short: "Parking", icon: CircleParking, roles: ["admin", "encoder", "viewer"] },
   { href: "/dashboard/tenants", label: "Fishport Tenants", short: "Tenants", icon: Store, roles: ["admin", "encoder", "viewer"] },
 ];
 
@@ -19,7 +22,7 @@ function Logo() {
     <div className="flex items-center gap-3">
       <div className="grid h-11 w-11 shrink-0 place-items-center overflow-hidden rounded-md bg-white p-1">
         <Image
-          src="/logo.png"
+          src="/fishport_1.jpg"
           alt="Mercedes Fish Port logo"
           width={44}
           height={44}
@@ -39,10 +42,11 @@ export default function Sidebar() {
   const { user, logout } = useAuth();
   const { openNewEntry } = useEntryModal();
   const pathname = usePathname();
+  const [tenantsOpen, setTenantsOpen] = useState(pathname.startsWith("/dashboard/tenants"));
   if (!user) return null;
 
   const items = NAV.filter((n) => n.roles.includes(user.role));
-  const canAdd = user.role !== "viewer";
+  const canAdd = user.role !== "viewer" && pathname !== "/parking" && !pathname.startsWith("/dashboard/tenants");
   const initials = user.full_name
     .split(" ")
     .map((w) => w[0])
@@ -73,7 +77,29 @@ export default function Sidebar() {
 
         <nav className="mt-5 flex-1 space-y-1 px-3">
           {items.map(({ href, label, icon: Icon }) => {
-            const active = pathname === href;
+            const active = pathname === href || pathname.startsWith(`${href}/`);
+            if (href === "/dashboard/tenants") return (
+              <div key={href}>
+                <button
+                  type="button"
+                  onClick={() => setTenantsOpen((open) => !open)}
+                  aria-expanded={tenantsOpen}
+                  aria-controls="tenant-groups-menu"
+                  className={`flex w-full items-center gap-3 rounded-md px-3.5 py-2.5 text-left text-sm font-medium transition ${active ? "bg-white/15 text-white" : "text-slate-300 hover:bg-white/10 hover:text-white"}`}
+                >
+                  <Icon size={18} className={active ? "text-sky-300" : ""} />
+                  <span className="flex-1">{label}</span>
+                  <ChevronDown size={15} className={`transition ${tenantsOpen ? "rotate-180" : ""}`} />
+                </button>
+                {tenantsOpen && <div id="tenant-groups-menu" className="mt-1 max-h-[42vh] space-y-0.5 overflow-y-auto border-l border-white/15 pl-3">
+                  {TENANT_GROUPS.map((group) => {
+                    const groupHref = `/dashboard/tenants/${group.slug}`;
+                    const groupActive = pathname === groupHref;
+                    return <Link key={group.slug} href={groupHref} title={group.label} className={`block rounded-md px-3 py-2 text-xs leading-snug transition ${groupActive ? "bg-sky-500/20 text-sky-100" : "text-slate-400 hover:bg-white/10 hover:text-white"}`}>{group.label}</Link>;
+                  })}
+                </div>}
+              </div>
+            );
             return (
               <Link
                 key={href}
@@ -113,7 +139,7 @@ export default function Sidebar() {
         className="glass-dark fixed inset-x-3 bottom-[max(0.75rem,env(safe-area-inset-bottom))] z-30 flex items-center gap-1 rounded-xl p-1.5 lg:hidden"
       >
         {items.map(({ href, short, label, icon: Icon }) => {
-          const active = pathname === href;
+          const active = pathname === href || pathname.startsWith(`${href}/`);
           return (
             <Link
               key={href}

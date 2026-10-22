@@ -139,7 +139,7 @@ function lf_where(array $g, bool $isTop): array {
  *    sorting : sort=landing_date|landing_time|boat_name|species|broker|origin|
  *                   plate_number|status|volume|price_per_kg|total_value|created_at
  *              dir=asc|desc
- *    paging  : limit (max 1000)  offset
+ *    paging  : limit (max 5000)  offset
  *
  *  Leaderboard
  *    ?top=broker|vessel|owner|species|origin|plate|gear|ground|quality|status|date|delivery
@@ -153,6 +153,9 @@ function lf_where(array $g, bool $isTop): array {
  *
  *  Dropdown values (includes "years", newest first)
  *    ?meta=options
+ *
+ *  Compact totals (used by comparison cards without downloading every row)
+ *    ?summary=1  (+ any filter above, optionally &exclude_rejected=1)
  * ------------------------------------------------------------------ */
 if ($_SERVER['REQUEST_METHOD'] === 'GET') {
   auth_user(['admin', 'encoder']);
@@ -192,6 +195,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET') {
     $out['years'] = $years;
 
     json_out($out);
+  }
+
+  // ---- compact totals for KPI comparisons ----
+  // Returning four numbers is substantially faster than sending hundreds or
+  // thousands of full landing rows that the browser would only sum again.
+  if (($g['summary'] ?? '') === '1') {
+    [$w, $p] = lf_where($g, false);
+    if (($g['exclude_rejected'] ?? '') === '1') $w[] = "status <> 'rejected'";
+
+    $st = db()->prepare(
+      'SELECT COUNT(*) AS count,
+              COALESCE(ROUND(SUM(' . LF_KG . '), 2), 0) AS volume,
+              COALESCE(ROUND(SUM(total_value), 2), 0) AS value,
+              SUM(CASE WHEN status = \'pending\' THEN 1 ELSE 0 END) AS pending
+       FROM fp_landings WHERE ' . implode(' AND ', $w)
+    );
+    $st->execute($p);
+    json_out($st->fetch());
   }
 
   // ---- leaderboard: top broker / vessel / by land / by sea / ... ----
@@ -368,7 +389,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET') {
     ? $sorts[$sort] . " $dir, id DESC"
     : 'landing_date DESC, created_at DESC, trip_id, id ASC';
 
-  $limit  = min(1000, max(1, (int)($g['limit'] ?? 1000)));
+  // Larger pages avoid repeated high-latency HTTP round trips while retaining
+  // a hard ceiling for memory usage. The client still pages beyond this value.
+  $limit  = min(5000, max(1, (int)($g['limit'] ?? 1000)));
   $offset = max(0, (int)($g['offset'] ?? 0));
 
   $st = db()->prepare(

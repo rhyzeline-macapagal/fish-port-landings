@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, ReactNode, useEffect, useRef, useState } from "react";
+import { memo, ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import EditLandingModal from "@/components/EditLandingModal";
 import {
   ArrowDown, ArrowDownRight, ArrowUp, ArrowUpDown, ArrowUpRight, CalendarDays, Check, Clock, Download,
@@ -52,6 +52,7 @@ type TopRow = {
   avg_price_per_kg: number | string | null;
 };
 type TopResult = { group: string; by: string; rows: TopRow[] };
+type LandingSummary = { count: number | string; volume: number | string; value: number | string; pending: number | string };
 
 type ExportScope = "all" | "year" | "range" | "shown";
 type RouteFilter = "" | "sea" | "land";
@@ -263,6 +264,23 @@ function summarize(list: Landing[], skipRejected: boolean) {
     value: c.reduce((s, r) => s + Number(r.total_value || 0), 0),
     volume: c.reduce((s, r) => s + kg(r), 0),
   };
+}
+
+function normalizedSummary(summary: LandingSummary) {
+  return {
+    count: Number(summary.count) || 0,
+    value: Number(summary.value) || 0,
+    volume: Number(summary.volume) || 0,
+  };
+}
+
+function uniqueNames(values: Array<string | null | undefined>) {
+  const names = new Map<string, string>();
+  values.forEach((value) => {
+    const name = String(value ?? "").trim();
+    if (name && !names.has(name.toLocaleLowerCase())) names.set(name.toLocaleLowerCase(), name);
+  });
+  return Array.from(names.values()).toSorted((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
 }
 
 /* ---------- Stat cards (same as the dashboard) ---------- */
@@ -565,6 +583,62 @@ function compareBy(key: SortKey, dir: "asc" | "desc") {
   };
 }
 
+function filterCardRows(list: Landing[], f: RecordCardFilters) {
+  const q = f.search.trim().toLowerCase();
+  const filtered = list.filter((r) => {
+    const matchesSearch = !q || [r.boat_name, r.boat_owner, r.broker, r.species, r.origin, r.plate_number, r.fishing_gear]
+      .some((v) => String(v ?? "").toLowerCase().includes(q));
+    const matchesRoute = !f.route || (f.route === "land") === (Number(r.truck_delivery) === 1);
+    return matchesSearch && matchesRoute
+      && (!f.status || String(r.status).toLowerCase() === f.status)
+      && (!f.species || String(r.species ?? "") === f.species);
+  });
+  const sorters: Record<string, (a: Landing, b: Landing) => number> = {
+    newest: (a, b) => `${b.landing_date} ${b.landing_time ?? ""}`.localeCompare(`${a.landing_date} ${a.landing_time ?? ""}`),
+    oldest: (a, b) => `${a.landing_date} ${a.landing_time ?? ""}`.localeCompare(`${b.landing_date} ${b.landing_time ?? ""}`),
+    value_desc: (a, b) => Number(b.total_value || 0) - Number(a.total_value || 0),
+    value_asc: (a, b) => Number(a.total_value || 0) - Number(b.total_value || 0),
+    volume_desc: (a, b) => Number(b.volume || 0) - Number(a.volume || 0),
+    volume_asc: (a, b) => Number(a.volume || 0) - Number(b.volume || 0),
+    supplier: (a, b) => String(a.boat_name ?? "").localeCompare(String(b.boat_name ?? "")),
+  };
+  return filtered.toSorted(sorters[f.sort] ?? sorters.newest);
+}
+
+// Keep keystrokes local to this small component. The large records table only
+// re-renders after the user pauses, instead of once for every typed character.
+function RecordSearchInput({ value, onSearch }: { value: string; onSearch: (value: string) => void }) {
+  const [draft, setDraft] = useState(value);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => () => {
+    if (timer.current) clearTimeout(timer.current);
+  }, []);
+
+  function update(next: string) {
+    setDraft(next);
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = setTimeout(() => onSearch(next), 180);
+  }
+
+  return (
+    <div className="relative">
+      <Search size={15} className="pointer-events-none absolute left-3 top-3 text-slate-400" />
+      <input
+        aria-label="Search records"
+        aria-busy={draft !== value}
+        className={`${inputCls} pl-9 pr-9`}
+        placeholder="Search records"
+        value={draft}
+        onChange={(e) => update(e.target.value)}
+      />
+      {draft !== value && (
+        <Loader2 size={14} className="pointer-events-none absolute right-3 top-3 animate-spin text-sky-600" />
+      )}
+    </div>
+  );
+}
+
 function SortTh({
   label, k, sort, onSort, className, text,
 }: {
@@ -671,12 +745,16 @@ export default function LandingsPage() {
   const [applied, setApplied] = useState<Filters>(EMPTY);
   const [month, setMonth] = useState("0"); // "0" = whole year / no month filter
   const [rows, setRows] = useState<Landing[]>([]);
-  const [prev, setPrev] = useState<{ label: string; rows: Landing[] } | null>(null);
+  const [prev, setPrev] = useState<{ label: string; stats: ReturnType<typeof normalizedSummary> } | null>(null);
   const prevReq = useRef(0);
+  const topReq = useRef(0);
+  const listReq = useRef(0);
+  const listAbort = useRef<AbortController | null>(null);
   const [cardFilters, setCardFilters] = useState<RecordCardFilters>(EMPTY_CARD_FILTERS);
   const [options, setOptions] = useState<Options>(NO_OPTIONS);
   const [showMore, setShowMore] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
   const [bulkBusy, setBulkBusy] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -705,12 +783,11 @@ export default function LandingsPage() {
   const [deleting, setDeleting] = useState<Landing | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
 
-  // Export for the records list: a route, and optionally a single supplier, owner or plate
+  // Export for the records list: a route, and optionally a single supplier or owner
   const [gxOpen, setGxOpen] = useState(false);
   const [gxRoute, setGxRoute] = useState<RouteFilter>("");
   const [gxVessel, setGxVessel] = useState("");
   const [gxOwner, setGxOwner] = useState("");
-  const [gxPlate, setGxPlate] = useState("");
   const [gxScope, setGxScope] = useState<GroupScope>("view");
   const [gxFrom, setGxFrom] = useState("");
   const [gxTo, setGxTo] = useState("");
@@ -721,6 +798,7 @@ export default function LandingsPage() {
   const canEdit = user?.role === "admin" || user?.role === "encoder";
 
   async function loadTop(f: Filters, group = topGroup, by = topBy, n = topN) {
+    const id = ++topReq.current;
     setTopLoading(true);
     try {
       const qs = buildQs(f);
@@ -730,11 +808,12 @@ export default function LandingsPage() {
       qs.set("top", group);
       qs.set("by", by);
       qs.set("n", String(n));
-      setTop(await api<TopResult>(`landings.php?${qs.toString()}`));
+      const result = await api<TopResult>(`landings.php?${qs.toString()}`);
+      if (id === topReq.current) setTop(result);
     } catch {
-      setTop(null);
+      if (id === topReq.current) setTop(null);
     } finally {
-      setTopLoading(false);
+      if (id === topReq.current) setTopLoading(false);
     }
   }
 
@@ -752,9 +831,16 @@ export default function LandingsPage() {
       delete params.period;
       params.from = range.from;
       params.to = range.to;
-      const list = await fetchAllLandings(params);
+      params.summary = "1";
+      if (!f.status) params.exclude_rejected = "1";
+      const summary = await api<LandingSummary | Landing[]>(`landings.php?${new URLSearchParams(params).toString()}`);
       if (id !== prevReq.current) return;
-      setPrev({ label: range.label, rows: Array.from(new Map(list.map((r) => [r.id, r])).values()) });
+      // Keep the frontend compatible while an older hosted PHP API is being
+      // replaced: old versions ignore ?summary=1 and return a row array.
+      const stats = Array.isArray(summary)
+        ? summarize(summary, !f.status)
+        : normalizedSummary(summary);
+      setPrev({ label: range.label, stats });
     } catch {
       if (id === prevReq.current) setPrev(null);
     }
@@ -786,13 +872,13 @@ export default function LandingsPage() {
     ].join("  |  ");
   }
 
-  // The API returns at most 1000 rows per request, so page through until everything is loaded.
-  async function fetchAllLandings(params: Record<string, string>) {
-    const PAGE = 1000;
+  // Fetch in large bounded pages to avoid repeated high-latency round trips.
+  async function fetchAllLandings(params: Record<string, string>, signal?: AbortSignal) {
+    const PAGE = 5000;
     const out: Landing[] = [];
     for (let offset = 0; ; offset += PAGE) {
       const qs = new URLSearchParams({ ...params, limit: String(PAGE), offset: String(offset) });
-      const chunk = await api<Landing[]>(`landings.php?${qs.toString()}`);
+      const chunk = await api<Landing[]>(`landings.php?${qs.toString()}`, { signal });
       out.push(...chunk);
       if (chunk.length < PAGE) break;
     }
@@ -902,7 +988,6 @@ export default function LandingsPage() {
     setGxRoute(cardFilters.route); // start from whatever route the card is showing
     setGxVessel("");
     setGxOwner("");
-    setGxPlate("");
     setGxScope("view");
     setGxFrom("");
     setGxTo("");
@@ -921,7 +1006,6 @@ export default function LandingsPage() {
       const picked = [
         gxVessel && `Supplier: ${gxVessel}`,
         gxOwner && `Owner: ${gxOwner}`,
-        gxPlate && `Plate: ${gxPlate}`,
       ].filter(Boolean) as string[];
       const routeTitle = gxRoute === "sea" ? "By sea" : gxRoute === "land" ? "By land" : "All routes";
 
@@ -940,7 +1024,6 @@ export default function LandingsPage() {
         if (gxRoute) params.delivery = gxRoute;
         if (gxVessel) params.vessel = gxVessel;
         if (gxOwner) params.owner = gxOwner;
-        if (gxPlate) params.plate = gxPlate;
         if (gxScope === "range") {
           params.from = gxFrom;
           params.to = gxTo;
@@ -959,7 +1042,7 @@ export default function LandingsPage() {
       const what = picked.length ? picked.join(", ") : "All suppliers";
       const subtitle = [routeTitle, ...picked, period, `${list.length} records`, `Exported ${stamp()}`].join("  |  ");
       const report = buildRecordsReport(list, `${routeTitle} landings - ${what}`, subtitle, skipRejected);
-      const who = slugify([gxVessel, gxOwner, gxPlate].filter(Boolean).join(" ")) || "all";
+      const who = slugify([gxVessel, gxOwner].filter(Boolean).join(" ")) || "all";
       const name = `fish-landings_${gxRoute || "all"}_${who}_${slugify(period)}_${stamp()}`;
 
       if (kind === "xlsx") await exportXlsx(name, report);
@@ -974,21 +1057,42 @@ export default function LandingsPage() {
   }
 
   async function load(f: Filters = filters, m: string = month) {
-    setLoading(true);
+    const id = ++listReq.current;
+    listAbort.current?.abort();
+    const controller = new AbortController();
+    listAbort.current = controller;
+    const keepCurrentRows = rows.length > 0;
+    setLoading(!keepCurrentRows);
+    setRefreshing(keepCurrentRows);
     setError("");
     setApplied(f);
     setPrev(null);
-    loadTop(f);
-    loadPrev(f, m);
+    if (f.q.trim()) {
+      // Free-text LIKE searches are the most expensive database operation.
+      // Keep them to one query; rankings and historical comparisons can load
+      // again as soon as the search is cleared.
+      topReq.current += 1;
+      prevReq.current += 1;
+      setTop(null);
+      setTopLoading(false);
+    } else {
+      loadTop(f);
+      loadPrev(f, m);
+    }
     try {
-      // The API returns at most 1000 rows per request, so fetch every page
-      const all = await fetchAllLandings(Object.fromEntries(buildQs(f)));
+      const all = await fetchAllLandings(Object.fromEntries(buildQs(f)), controller.signal);
+      if (id !== listReq.current) return;
       // Guard against a row appearing on two pages
       setRows(Array.from(new Map(all.map((r) => [r.id, r])).values()));
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Could not load landings.");
+      if (id === listReq.current && !(e instanceof DOMException && e.name === "AbortError")) {
+        setError(e instanceof Error ? e.message : "Could not load landings.");
+      }
     } finally {
-      setLoading(false);
+      if (id === listReq.current) {
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
   }
 
@@ -1016,6 +1120,8 @@ export default function LandingsPage() {
     loadOptions();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [version]);
+
+  useEffect(() => () => listAbort.current?.abort(), []);
 
   // Close the "Approve all" dialog with Esc
   useEffect(() => {
@@ -1170,31 +1276,42 @@ export default function LandingsPage() {
     apply({ [g.filter]: applied[g.filter] === v ? "" : v } as Partial<Filters>);
   }
 
-  const pendingCount = rows.filter((r) => r.status === "pending").length;
-  const pendingValue = rows
-    .filter((r) => r.status === "pending")
-    .reduce((sum, r) => sum + Number(r.total_value || 0), 0);
+  const pending = useMemo(() => {
+    const items = rows.filter((r) => r.status === "pending");
+    return {
+      count: items.length,
+      value: items.reduce((sum, r) => sum + Number(r.total_value || 0), 0),
+    };
+  }, [rows]);
+  const pendingCount = pending.count;
+  const pendingValue = pending.value;
 
   // Same rule as the dashboard: rejected entries are not counted unless the Rejected tab is chosen.
   const skipRejected = applied.status === "";
-  const countable = skipRejected ? rows.filter((r) => r.status !== "rejected") : rows;
+  const countable = useMemo(
+    () => skipRejected ? rows.filter((r) => r.status !== "rejected") : rows,
+    [rows, skipRejected],
+  );
   const rejectedCount = rows.length - countable.length;
-  const cur = summarize(rows, skipRejected);
-  const prevStats = prev ? summarize(prev.rows, skipRejected) : null;
+  const cur = useMemo(() => summarize(rows, skipRejected), [rows, skipRejected]);
+  const prevStats = prev?.stats ?? null;
   const totalValue = cur.value;
   const tripCount = cur.count;
 
   // Mini trend lines for the cards (per day, or per month when the view spans a long time)
-  const spark = (pick: (r: Landing) => number) => {
+  const sparks = useMemo(() => {
     const dates = new Set(countable.map((r) => r.landing_date));
     const bucket = (d: string) => (dates.size > 60 ? d.slice(0, 7) : d);
-    const m = new Map<string, number>();
-    countable.forEach((r) => m.set(bucket(r.landing_date), (m.get(bucket(r.landing_date)) ?? 0) + pick(r)));
-    const arr = Array.from(m.entries()).sort(([a], [b]) => a.localeCompare(b)).map(([, v]) => v);
-    return arr.length > 1 ? arr : undefined;
-  };
+    const build = (pick: (r: Landing) => number) => {
+      const values = new Map<string, number>();
+      countable.forEach((r) => values.set(bucket(r.landing_date), (values.get(bucket(r.landing_date)) ?? 0) + pick(r)));
+      const result = Array.from(values.entries()).sort(([a], [b]) => a.localeCompare(b)).map(([, v]) => v);
+      return result.length > 1 ? result : undefined;
+    };
+    return { count: build(() => 1), value: build((r) => Number(r.total_value || 0)), volume: build(kg) };
+  }, [countable]);
 
-  const sortedRows = tableSort ? [...rows].sort(compareBy(tableSort.key, tableSort.dir)) : rows;
+  const sortedRows = tableSort ? rows.toSorted(compareBy(tableSort.key, tableSort.dir)) : rows;
   // The year and month have their own selectors, so they are not shown as chips.
   const activeChips = Object.entries(applied).filter(
     ([k, v]) => v && k !== "sort" && k !== "dir" && k !== "year" && !(month !== "0" && (k === "from" || k === "to"))
@@ -1204,40 +1321,28 @@ export default function LandingsPage() {
   const topMax = top ? Math.max(...top.rows.map((r) => metricNum(top.by, r)), 0) : 0;
   const yearOptions = options.years.length ? options.years : [Number(THIS_YEAR)];
 
-  const filterCardRows = (list: Landing[], f: RecordCardFilters) => {
-    const q = f.search.trim().toLowerCase();
-    const filtered = list.filter((r) => {
-      const matchesSearch = !q || [r.boat_name, r.boat_owner, r.broker, r.species, r.origin, r.plate_number, r.fishing_gear]
-        .some((v) => String(v ?? "").toLowerCase().includes(q));
-      const matchesRoute = !f.route || (f.route === "land") === (Number(r.truck_delivery) === 1);
-      return matchesSearch && matchesRoute
-        && (!f.status || String(r.status).toLowerCase() === f.status)
-        && (!f.species || String(r.species ?? "") === f.species);
-    });
-    const sorters: Record<string, (a: Landing, b: Landing) => number> = {
-      newest: (a, b) => `${b.landing_date} ${b.landing_time ?? ""}`.localeCompare(`${a.landing_date} ${a.landing_time ?? ""}`),
-      oldest: (a, b) => `${a.landing_date} ${a.landing_time ?? ""}`.localeCompare(`${b.landing_date} ${b.landing_time ?? ""}`),
-      value_desc: (a, b) => Number(b.total_value || 0) - Number(a.total_value || 0),
-      value_asc: (a, b) => Number(a.total_value || 0) - Number(b.total_value || 0),
-      volume_desc: (a, b) => Number(b.volume || 0) - Number(a.volume || 0),
-      volume_asc: (a, b) => Number(a.volume || 0) - Number(b.volume || 0),
-      supplier: (a, b) => String(a.boat_name ?? "").localeCompare(String(b.boat_name ?? "")),
-    };
-    return filtered.sort(sorters[f.sort] ?? sorters.newest);
-  };
+  // Export choices come from the actual Landing Records as well as API metadata.
+  // This keeps the dropdowns complete even if the metadata request is delayed.
+  const exportSuppliers = useMemo(
+    () => uniqueNames([...options.vessels, ...rows.map((r) => r.boat_name)]),
+    [options.vessels, rows],
+  );
+  const exportOwners = useMemo(
+    () => uniqueNames([...options.owners, ...rows.map((r) => r.boat_owner)]),
+    [options.owners, rows],
+  );
 
   const recordList = filterCardRows(sortedRows, cardFilters);
-  const seaCount = rows.filter((r) => Number(r.truck_delivery) !== 1).length;
+  const seaCount = useMemo(() => rows.filter((r) => Number(r.truck_delivery) !== 1).length, [rows]);
   const landCount = rows.length - seaCount;
   // Land-only view drops the Supplier / Gear columns; everything else shows all columns
   const recordCols = cardFilters.route === "land" ? LAND_COLUMNS : SEA_COLUMNS;
   const recordMinW = cardFilters.route === "land" ? "min-w-[1100px]" : "min-w-[1450px]";
 
-  const matchesGx = (r: Landing) =>
+  const gxList = filterCardRows(sortedRows, { ...cardFilters, route: gxRoute }).filter((r) =>
     (!gxVessel || r.boat_name === gxVessel) &&
-    (!gxOwner || r.boat_owner === gxOwner) &&
-    (!gxPlate || r.plate_number === gxPlate);
-  const gxList = filterCardRows(sortedRows, { ...cardFilters, route: gxRoute }).filter(matchesGx);
+    (!gxOwner || r.boat_owner === gxOwner)
+  );
   const gxViewCount = gxList.length;
 
   const periodLabel = month !== "0" ? `${MONTHS[Number(month) - 1]} ${filters.year}` : filters.year || "all years";
@@ -1357,7 +1462,7 @@ export default function LandingsPage() {
             current={cur.count}
             previous={prevStats?.count}
             compareLabel={prev?.label}
-            spark={spark(() => 1)}
+            spark={sparks.count}
           />
         </button>
 
@@ -1372,7 +1477,7 @@ export default function LandingsPage() {
             current={cur.value}
             previous={prevStats?.value}
             compareLabel={prev?.label}
-            spark={spark((r) => Number(r.total_value || 0))}
+            spark={sparks.value}
           />
         </button>
 
@@ -1387,7 +1492,7 @@ export default function LandingsPage() {
             current={cur.volume}
             previous={prevStats?.volume}
             compareLabel={prev?.label}
-            spark={spark(kg)}
+            spark={sparks.volume}
           />
         </button>
 
@@ -1567,11 +1672,13 @@ export default function LandingsPage() {
             <div className="relative">
               <Search size={16} className="pointer-events-none absolute left-3.5 top-3.5 text-slate-500" />
               <input
-                className={`${inputCls} pl-10`}
+                className={`${inputCls} pl-10 pr-10`}
                 placeholder="Search supplier, owner, broker, species, origin or plate"
                 value={filters.q}
                 onChange={(e) => setFilters({ ...filters, q: e.target.value })}
+                aria-busy={refreshing}
               />
+              {refreshing && <Loader2 size={16} className="pointer-events-none absolute right-3.5 top-3.5 animate-spin text-sky-600" />}
             </div>
             <div className="flex gap-2">
               <button
@@ -1751,10 +1858,10 @@ export default function LandingsPage() {
             </div>
 
             <div className="grid shrink-0 grid-cols-1 gap-2 border-b border-slate-200 bg-white p-3 sm:grid-cols-2 lg:grid-cols-[minmax(180px,1fr)_150px_180px_180px]">
-              <div className="relative">
-                <Search size={15} className="pointer-events-none absolute left-3 top-3 text-slate-400" />
-                <input aria-label="Search records" className={`${inputCls} pl-9`} placeholder="Search records" value={cardFilters.search} onChange={(e) => setCardFilters({ ...cardFilters, search: e.target.value })} />
-              </div>
+              <RecordSearchInput
+                value={cardFilters.search}
+                onSearch={(search) => setCardFilters((current) => ({ ...current, search }))}
+              />
               <select aria-label="Status filter" className={inputCls} value={cardFilters.status} onChange={(e) => setCardFilters({ ...cardFilters, status: e.target.value })}>
                 <option value="">All statuses</option><option value="pending">Pending</option><option value="approved">Approved</option><option value="rejected">Rejected</option>
               </select>
@@ -1989,7 +2096,7 @@ export default function LandingsPage() {
         </div>
       )}
 
-      {/* Export the records list, optionally for one route / supplier / owner / plate */}
+      {/* Export the records list, optionally for one route, supplier or owner */}
       {gxOpen && (
         <div
           className="fixed inset-0 z-50 grid place-items-center bg-slate-900/50 p-4"
@@ -2006,7 +2113,7 @@ export default function LandingsPage() {
               <div>
                 <h2 id="gx-title" className="text-lg font-semibold text-slate-900">Export landing records</h2>
                 <p className="mt-1 text-sm text-slate-600">
-                  Pick a route, supplier, owner or plate number to report on just that one.
+                  Pick a route, supplier or owner to report on just that one.
                   Leave them blank to export the whole list.
                 </p>
               </div>
@@ -2028,18 +2135,12 @@ export default function LandingsPage() {
               </select>
               <select aria-label="Supplier" className={inputCls} value={gxVessel} onChange={(e) => setGxVessel(e.target.value)}>
                 <option value="">All suppliers / boats</option>
-                {selectOptions(options.vessels)}
+                {selectOptions(exportSuppliers)}
               </select>
               <select aria-label="Registered owner" className={inputCls} value={gxOwner} onChange={(e) => setGxOwner(e.target.value)}>
                 <option value="">All registered owners</option>
-                {selectOptions(options.owners)}
+                {selectOptions(exportOwners)}
               </select>
-              {gxRoute !== "sea" && (
-                <select aria-label="Plate number" className={inputCls} value={gxPlate} onChange={(e) => setGxPlate(e.target.value)}>
-                  <option value="">All plate numbers</option>
-                  {selectOptions(options.plates)}
-                </select>
-              )}
             </div>
 
             <div className="mt-5 space-y-2">

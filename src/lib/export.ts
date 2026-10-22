@@ -13,7 +13,15 @@ export type Report = { title: string; subtitle?: string; tables: ExportTable[] }
 
 const ORG_NAME = "Mercedes Municipal Fish Port";
 // Files in the public/ folder. The first one that exists is used.
-const LOGO_CANDIDATES = ["/logo.png", "/logo.jpg", "/logo.jpeg", "/logo.webp", "/logo.svg"];
+const LOGO_CANDIDATES = [
+  "/fishport_1.jpg",
+  "/fishport.jpg",
+  "/logo.png",
+  "/logo.jpg",
+  "/logo.jpeg",
+  "/logo.webp",
+  "/logo.svg",
+];
 
 const NUM_FMT: Record<ColFormat, string | undefined> = {
   text: undefined,

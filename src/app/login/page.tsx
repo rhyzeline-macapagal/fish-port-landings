@@ -58,7 +58,7 @@ export default function LoginPage() {
         <div className="relative flex items-center gap-3">
           <div className="grid h-14 w-14 place-items-center rounded-2xl bg-white p-2 shadow-lg">
             <Image
-              src="/logo.png"
+              src="/fishport_1.jpg"
               alt="FishPort logo"
               width={44}
               height={44}
@@ -80,9 +80,7 @@ export default function LoginPage() {
           </p>
         </div>
 
-        <p className="relative text-sm text-white/60">
-          © {new Date().getFullYear()} FishPort Statistics
-        </p>
+        <p className="relative text-sm text-white/60">© FishPort Statistics</p>
       </div>
 
       {/* Form panel */}
@@ -91,7 +89,7 @@ export default function LoginPage() {
           {/* Logo (visible on mobile, too) */}
           <div className="mb-8 flex items-center gap-3 lg:hidden">
             <Image
-              src="/logo.png"
+              src="/fishport_1.jpg"
               alt="FishPort logo"
               width={44}
               height={44}
