@@ -1,113 +1,150 @@
 "use client";
 
-import { ArrowDownRight, ArrowUpRight, Minus } from "lucide-react";
-import type { LucideIcon } from "lucide-react";
-import { Area, AreaChart, ResponsiveContainer } from "recharts";
+import { memo } from "react";
+import { ArrowDownRight, ArrowUpRight, Minus, type LucideIcon } from "lucide-react";
 
-export const TONES = {
-  blue:   { icon: "from-sky-500 to-blue-600",       bar: "from-sky-400 to-blue-600",       hex: "#0ea5e9" },
-  green:  { icon: "from-emerald-500 to-teal-600",   bar: "from-emerald-400 to-teal-600",   hex: "#10b981" },
-  yellow: { icon: "from-amber-400 to-orange-500",   bar: "from-amber-300 to-orange-500",   hex: "#f59e0b" },
-  violet: { icon: "from-violet-500 to-fuchsia-600", bar: "from-violet-400 to-fuchsia-600", hex: "#8b5cf6" },
+const TONES = {
+  blue: { chip: "bg-sky-50 text-[#0875d1]", line: "#0875d1" },
+  green: { chip: "bg-emerald-50 text-emerald-600", line: "#10b981" },
+  yellow: { chip: "bg-amber-50 text-amber-600", line: "#f59e0b" },
+  violet: { chip: "bg-violet-50 text-violet-600", line: "#8b5cf6" },
 } as const;
-export type Tone = keyof typeof TONES;
 
-const card = "glass rounded-lg";
+export type KpiTone = keyof typeof TONES;
 
-/* "5.2% higher" / "3.1% lower" pill */
-export function Trend({ current, previous, dark = false }: { current: number; previous?: number | null; dark?: boolean }) {
+export function Trend({ current, previous }: { current: number; previous?: number | null }) {
   if (previous == null) return null;
 
   let kind: "up" | "down" | "flat";
   let text: string;
   if (previous === 0) {
-    if (current === 0) { kind = "flat"; text = "No change"; }
-    else { kind = "up"; text = "New activity"; }
+    if (current === 0) {
+      kind = "flat";
+      text = "No change";
+    } else {
+      kind = "up";
+      text = "New activity";
+    }
   } else {
-    const pct = ((current - previous) / previous) * 100;
-    if (Math.abs(pct) < 0.05) { kind = "flat"; text = "No change"; }
-    else if (pct > 0) { kind = "up"; text = `${pct.toFixed(1)}% higher`; }
-    else { kind = "down"; text = `${Math.abs(pct).toFixed(1)}% lower`; }
+    const percentage = ((current - previous) / previous) * 100;
+    if (Math.abs(percentage) < 0.05) {
+      kind = "flat";
+      text = "No change";
+    } else if (percentage > 0) {
+      kind = "up";
+      text = `${percentage.toFixed(1)}%`;
+    } else {
+      kind = "down";
+      text = `${Math.abs(percentage).toFixed(1)}%`;
+    }
   }
 
-  const styles = dark
-    ? { up: "bg-emerald-400/20 text-emerald-200", down: "bg-rose-400/20 text-rose-200", flat: "bg-white/15 text-slate-200" }
-    : { up: "bg-emerald-100 text-emerald-700", down: "bg-rose-100 text-rose-700", flat: "bg-slate-100 text-slate-600" };
+  const styles = {
+    up: "text-emerald-600",
+    down: "text-red-600",
+    flat: "text-slate-500",
+  };
   const Icon = kind === "up" ? ArrowUpRight : kind === "down" ? ArrowDownRight : Minus;
 
   return (
-    <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold ${styles[kind]}`}>
-      <Icon size={13} /> {text}
+    <span className={`inline-flex items-center gap-0.5 text-[11px] font-semibold ${styles[kind]}`}>
+      <Icon size={13} aria-hidden="true" /> {text}
     </span>
   );
 }
 
-function Sparkline({ data, color, id }: { data: { v: number }[]; color: string; id: string }) {
-  if (data.length < 2 || !data.some((d) => d.v > 0)) return null;
+function Sparkline({ values, color }: { values: number[]; color: string }) {
+  const max = Math.max(...values);
+  if (values.length < 2 || max <= 0) return null;
+
+  const width = 100;
+  const height = 22;
+  const step = width / (values.length - 1);
+  const points = values
+    .map((value, index) => `${(index * step).toFixed(1)},${(height - 2 - (value / max) * (height - 4)).toFixed(1)}`)
+    .join(" ");
+
   return (
-    <div className="mt-3 h-10">
-      <ResponsiveContainer width="100%" height="100%">
-        <AreaChart data={data} margin={{ top: 2, right: 0, bottom: 0, left: 0 }}>
-          <defs>
-            <linearGradient id={id} x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor={color} stopOpacity={0.35} />
-              <stop offset="100%" stopColor={color} stopOpacity={0} />
-            </linearGradient>
-          </defs>
-          <Area type="monotone" dataKey="v" stroke={color} strokeWidth={2} fill={`url(#${id})`} isAnimationActive={false} />
-        </AreaChart>
-      </ResponsiveContainer>
-    </div>
+    <svg viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" className="h-5 w-16 shrink-0 sm:w-20" aria-hidden="true">
+      <polyline
+        points={points}
+        fill="none"
+        stroke={color}
+        strokeWidth={2}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        vectorEffect="non-scaling-stroke"
+      />
+    </svg>
   );
 }
 
-export default function KpiCard({
-  label, value, icon: Icon, tone, hint, loading, current, previous, compareLabel, spark, highlight,
+const KpiCard = memo(function KpiCard({
+  label,
+  value,
+  compactValue,
+  icon: Icon,
+  tone,
+  hint,
+  loading,
+  current,
+  previous,
+  compareLabel,
+  spark,
+  highlight,
 }: {
   label: string;
   value: string;
+  compactValue?: string;
   icon: LucideIcon;
-  tone: Tone;
-  hint: string;
+  tone: KpiTone;
+  hint?: string;
   loading?: boolean;
   current?: number;
   previous?: number | null;
   compareLabel?: string;
-  spark?: { v: number }[];
+  spark?: number[];
   highlight?: boolean;
 }) {
-  const t = TONES[tone];
+  const colors = TONES[tone];
+
   return (
-    <div className={`${card} relative h-full overflow-hidden p-5 ${highlight ? "ring-2 ring-amber-400/70" : ""}`}>
-      <div className={`absolute inset-x-0 top-0 h-1 bg-gradient-to-r ${t.bar}`} />
-      <div
-        className="pointer-events-none absolute -right-10 -top-10 h-32 w-32 rounded-full opacity-25 blur-2xl"
-        style={{ background: t.hex }}
-      />
-      <div className="relative">
-        <div className="flex items-center justify-between gap-3">
-          <p className="text-sm font-medium text-slate-700">{label}</p>
-          <span className={`grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-gradient-to-br ${t.icon} text-white shadow-md`}>
-            <Icon size={20} />
-          </span>
+    <article
+      className={`@container flex h-full min-h-32 min-w-0 flex-col rounded-xl border bg-white p-4 shadow-[0_2px_10px_rgba(18,52,77,0.05)] ${
+        highlight ? "border-amber-300" : "border-slate-200"
+      }`}
+    >
+      <div className="flex items-center gap-2.5 sm:gap-3">
+        <span className={`grid h-9 w-9 shrink-0 place-items-center rounded-full sm:h-10 sm:w-10 ${colors.chip}`}>
+          <Icon size={19} strokeWidth={2.2} aria-hidden="true" />
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="line-clamp-2 text-[10px] font-medium leading-tight text-slate-600 sm:truncate sm:text-xs">{label}</p>
+          {loading ? (
+            <div className="mt-2 h-7 w-24 animate-pulse rounded bg-slate-100" />
+          ) : (
+            <p className="mt-1 truncate font-semibold tabular-nums tracking-tight text-[#14263d]" style={{ fontSize: "clamp(1.1rem, 10cqw, 1.65rem)" }}>
+              {compactValue ? <><span className="sm:hidden">{compactValue}</span><span className="hidden sm:inline">{value}</span></> : value}
+            </p>
+          )}
         </div>
-
-        {loading ? (
-          <div className="mt-3 h-8 w-32 animate-pulse rounded bg-slate-900/10" />
-        ) : (
-          <p className="mt-2 break-words text-2xl font-semibold tabular-nums text-slate-900">{value}</p>
-        )}
-
-        {!loading && current !== undefined && previous != null && (
-          <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1">
-            <Trend current={current} previous={previous} />
-            {compareLabel && <span className="text-xs text-slate-600">{compareLabel}</span>}
-          </div>
-        )}
-
-        <p className="mt-2 text-xs text-slate-600">{hint}</p>
-        {!loading && spark && <Sparkline data={spark} color={t.hex} id={`spark-${tone}`} />}
       </div>
-    </div>
+
+      <div className="mt-auto flex min-h-6 items-end justify-between gap-2 pt-3">
+        <div className="min-w-0 leading-tight">
+          {!loading && current !== undefined && previous != null ? (
+            <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
+              <Trend current={current} previous={previous} />
+              {compareLabel && <span className="hidden truncate text-[10px] text-slate-500 sm:inline">{compareLabel}</span>}
+            </div>
+          ) : hint ? (
+            <p className="truncate text-[10px] text-slate-500">{hint}</p>
+          ) : null}
+        </div>
+        {!loading && spark && <Sparkline values={spark} color={colors.line} />}
+      </div>
+    </article>
   );
-}
+});
+
+export default KpiCard;

@@ -2,40 +2,41 @@
 
 @theme inline {
   --font-sans: var(--font-be-vietnam), system-ui, -apple-system, sans-serif;
+  --color-brand-navy: #12344d;
+  --color-brand-blue: #1a8cc7;
+  --color-brand-accent: #0875d1;
+  --color-page: #f5f8fc;
+  --color-ink: #14263d;
+  --color-muted: #64748b;
+  --color-line: #e2e8f0;
+}
+
+html {
+  min-height: 100%;
+  background: #f5f8fc;
 }
 
 body {
+  min-height: 100vh;
+  margin: 0;
   font-family: var(--font-sans);
-  background: #0f2a3d;
+  background: #f5f8fc;
+  color: #14263d;
   letter-spacing: -0.005em;
+  text-rendering: optimizeLegibility;
 }
 
-/* Fixed photo background with a tint so text stays readable */
-body::before {
-  content: "";
-  position: fixed;
-  inset: 0;
-  z-index: -1;
-  background:
-    linear-gradient(180deg, rgba(15, 42, 61, 0.55) 0%, rgba(15, 42, 61, 0.25) 50%, rgba(243, 246, 249, 0.3) 100%),
-    url("/fishport.jpg") center / cover no-repeat;
-}
-
-/* Glass surfaces (in the components layer so Tailwind utilities can override them) */
 @layer components {
   .glass {
-    background: rgba(255, 255, 255, 0.62);
-    -webkit-backdrop-filter: blur(18px) saturate(150%);
-    backdrop-filter: blur(18px) saturate(150%);
-    border: 1px solid rgba(255, 255, 255, 0.6);
-    box-shadow: 0 8px 30px rgba(15, 42, 61, 0.12);
+    background: #ffffff;
+    border: 1px solid #e2e8f0;
+    box-shadow: 0 3px 14px rgba(18, 52, 77, 0.06);
   }
+
   .glass-dark {
-    background: rgba(15, 42, 61, 0.6);
-    -webkit-backdrop-filter: blur(18px) saturate(150%);
-    backdrop-filter: blur(18px) saturate(150%);
-    border: 1px solid rgba(255, 255, 255, 0.15);
-    box-shadow: 0 8px 30px rgba(15, 42, 61, 0.25);
+    background: #12344d;
+    border: 1px solid #0b263a;
+    box-shadow: 0 8px 28px rgba(18, 52, 77, 0.2);
   }
 }
 

@@ -1,28 +1,28 @@
 "use client";
 
-import { memo, ReactNode, useEffect, useMemo, useRef, useState } from "react";
-import EditLandingModal from "@/components/EditLandingModal";
+import { ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import dynamic from "next/dynamic";
 import {
-  ArrowDown, ArrowDownRight, ArrowUp, ArrowUpDown, ArrowUpRight, CalendarDays, Check, Clock, Download,
-  FileSpreadsheet, FileText, Layers, Loader2, Minus, Package, Pencil, Plus, RotateCcw, Scale, Search, Ship,
+  ArrowDown, ArrowUp, ArrowUpDown, Check, ChevronDown, ChevronLeft, ChevronRight, Clock, Download,
+  FileSpreadsheet, FileText, Layers, Loader2, Package, Pencil, Plus, RotateCcw, Scale, Search, Ship,
   SlidersHorizontal, Trash2, Trophy, Truck, Wallet, X,
 } from "lucide-react";
-import type { LucideIcon } from "lucide-react";
 import { api, formatDate, formatPeso, Landing } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
 import { useEntryModal } from "@/context/EntryModalContext";
 import StatusBadge from "@/components/StatusBadge";
+import KpiCard from "@/components/KpiCard";
 import { ghostBtn, inputCls, primaryBtn } from "@/components/ui";
-import { exportPdf, exportXlsx, stamp, type Col, type ExportCell, type Report } from "@/lib/export";
+import type { Col, ExportCell, Report } from "@/lib/export";
 import { type ExportKind } from "@/components/ExportMenu";
 
 /* Same simple look as the dashboard: solid colours, thin borders, no blur layers, no gradients. */
 const card = "rounded-xl border border-slate-200 bg-white shadow-sm";
+const EditLandingModal = dynamic(() => import("@/components/EditLandingModal"));
 
 const THIS_YEAR = String(new Date().getFullYear());
 
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
-const MONTHS_SHORT = MONTHS.map((m) => m.slice(0, 3));
 
 /* Every key here is sent to landings.php as a query-string parameter when it has a value. */
 const EMPTY = {
@@ -256,6 +256,7 @@ function previousRange(f: Filters, month: string): PrevRange | null {
 }
 
 const kg = (r: Landing) => Number(r.volume || 0) * (r.unit === "ton" ? 1000 : 1);
+const compactNumber = (value: number) => new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 }).format(value);
 
 function summarize(list: Landing[], skipRejected: boolean) {
   const c = skipRejected ? list.filter((r) => r.status !== "rejected") : list;
@@ -282,110 +283,6 @@ function uniqueNames(values: Array<string | null | undefined>) {
   });
   return Array.from(names.values()).toSorted((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
 }
-
-/* ---------- Stat cards (same as the dashboard) ---------- */
-
-const TONES = {
-  blue:   { chip: "bg-sky-50 text-sky-600",         hex: "#0ea5e9" },
-  green:  { chip: "bg-emerald-50 text-emerald-600", hex: "#10b981" },
-  yellow: { chip: "bg-amber-50 text-amber-600",     hex: "#f59e0b" },
-  violet: { chip: "bg-violet-50 text-violet-600",   hex: "#8b5cf6" },
-} as const;
-type Tone = keyof typeof TONES;
-
-// "5.2% higher" / "3.1% lower" pill
-function Trend({ current, previous }: { current: number; previous?: number | null }) {
-  if (previous == null) return null;
-
-  let kind: "up" | "down" | "flat";
-  let text: string;
-  if (previous === 0) {
-    if (current === 0) { kind = "flat"; text = "No change"; }
-    else { kind = "up"; text = "New activity"; }
-  } else {
-    const pct = ((current - previous) / previous) * 100;
-    if (Math.abs(pct) < 0.05) { kind = "flat"; text = "No change"; }
-    else if (pct > 0) { kind = "up"; text = `${pct.toFixed(1)}% higher`; }
-    else { kind = "down"; text = `${Math.abs(pct).toFixed(1)}% lower`; }
-  }
-
-  const styles = { up: "bg-emerald-50 text-emerald-700", down: "bg-rose-50 text-rose-700", flat: "bg-slate-100 text-slate-600" };
-  const Icon = kind === "up" ? ArrowUpRight : kind === "down" ? ArrowDownRight : Minus;
-
-  return (
-    <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold ${styles[kind]}`}>
-      <Icon size={13} /> {text}
-    </span>
-  );
-}
-
-// Tiny inline-SVG sparkline
-function Sparkline({ values, color }: { values: number[]; color: string }) {
-  const max = Math.max(...values);
-  if (max <= 0) return null;
-  const w = 100, h = 28;
-  const step = w / (values.length - 1);
-  const points = values
-    .map((v, i) => `${(i * step).toFixed(1)},${(h - 2 - (v / max) * (h - 4)).toFixed(1)}`)
-    .join(" ");
-  return (
-    <svg viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" className="mt-3 h-8 w-full" aria-hidden="true">
-      <polyline
-        points={points}
-        fill="none"
-        stroke={color}
-        strokeWidth={2}
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        vectorEffect="non-scaling-stroke"
-      />
-    </svg>
-  );
-}
-
-const KpiCard = memo(function KpiCard({
-  label, value, icon: Icon, tone, hint, loading, current, previous, compareLabel, spark, highlight,
-}: {
-  label: string;
-  value: string;
-  icon: LucideIcon;
-  tone: Tone;
-  hint: string;
-  loading?: boolean;
-  current?: number;
-  previous?: number | null;
-  compareLabel?: string;
-  spark?: number[];
-  highlight?: boolean;
-}) {
-  const t = TONES[tone];
-  return (
-    <div className={`${card} h-full p-5 ${highlight ? "border-amber-300 ring-1 ring-amber-300" : ""}`}>
-      <div className="flex items-center justify-between gap-3">
-        <p className="text-sm font-medium text-slate-700">{label}</p>
-        <span className={`grid h-9 w-9 shrink-0 place-items-center rounded-lg ${t.chip}`}>
-          <Icon size={18} />
-        </span>
-      </div>
-
-      {loading ? (
-        <div className="mt-3 h-8 w-32 animate-pulse rounded bg-slate-100" />
-      ) : (
-        <p className="mt-2 break-words text-2xl font-semibold tabular-nums text-slate-900">{value}</p>
-      )}
-
-      {!loading && current !== undefined && previous !== undefined && (
-        <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1">
-          <Trend current={current} previous={previous} />
-          {compareLabel && <span className="text-xs text-slate-600">{compareLabel}</span>}
-        </div>
-      )}
-
-      <p className="mt-2 text-xs text-slate-600">{hint}</p>
-      {!loading && spark && <Sparkline values={spark} color={t.hex} />}
-    </div>
-  );
-});
 
 /* ---------- Small pieces ---------- */
 
@@ -751,6 +648,9 @@ export default function LandingsPage() {
   const listReq = useRef(0);
   const listAbort = useRef<AbortController | null>(null);
   const [cardFilters, setCardFilters] = useState<RecordCardFilters>(EMPTY_CARD_FILTERS);
+  const [recordPage, setRecordPage] = useState(1);
+  const [recordPageSize, setRecordPageSize] = useState(25);
+  const [expandedRows, setExpandedRows] = useState<Set<number>>(() => new Set());
   const [options, setOptions] = useState<Options>(NO_OPTIONS);
   const [showMore, setShowMore] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -853,6 +753,7 @@ export default function LandingsPage() {
   }
 
   function toggleSort(key: SortKey) {
+    setRecordPage(1);
     setTableSort((s) => {
       if (!s || s.key !== key) return { key, dir: "asc" };
       if (s.dir === "asc") return { key, dir: "desc" };
@@ -860,15 +761,29 @@ export default function LandingsPage() {
     });
   }
 
+  function updateCardFilters(patch: Partial<RecordCardFilters>) {
+    setRecordPage(1);
+    setCardFilters((current) => ({ ...current, ...patch }));
+  }
+
+  function toggleExpanded(id: number) {
+    setExpandedRows((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
   /* ---------- Export (Excel / PDF) ---------- */
 
   // "Year: 2026 | Status: pending | ..." line printed under the report title
-  function filterSummary() {
+  function filterSummary(exportedAt: string) {
     return [
       applied.year ? `Year: ${applied.year}` : "All years",
       ...(month !== "0" ? [`Month: ${MONTHS[Number(month) - 1]}`] : []),
       ...activeChips.map(([k, v]) => `${FILTER_LABELS[k] ?? k}: ${chipText(k, v)}`),
-      `Exported ${stamp()}`,
+      `Exported ${exportedAt}`,
     ].join("  |  ");
   }
 
@@ -934,6 +849,7 @@ export default function LandingsPage() {
 
     setExBusy(kind);
     try {
+      const { exportPdf, exportXlsx, stamp } = await import("@/lib/export");
       let list: Landing[];
       let label: string;
       let slug: string;
@@ -944,7 +860,7 @@ export default function LandingsPage() {
         list = sortedRows;
         label = month !== "0" ? `${MONTHS[Number(month) - 1]} ${applied.year}` : applied.year || "All years";
         slug = `current-view_${applied.year || "all-years"}${month !== "0" ? "_" + pad(Number(month)) : ""}`;
-        subtitle = filterSummary();
+        subtitle = filterSummary(stamp());
         skipRejected = applied.status === "";
       } else {
         const params: Record<string, string> = { sort: "landing_date", dir: "asc" };
@@ -1003,6 +919,7 @@ export default function LandingsPage() {
 
     setGxBusy(kind);
     try {
+      const { exportPdf, exportXlsx, stamp } = await import("@/lib/export");
       const picked = [
         gxVessel && `Supplier: ${gxVessel}`,
         gxOwner && `Owner: ${gxOwner}`,
@@ -1333,6 +1250,10 @@ export default function LandingsPage() {
   );
 
   const recordList = filterCardRows(sortedRows, cardFilters);
+  const recordPages = Math.max(1, Math.ceil(recordList.length / recordPageSize));
+  const safeRecordPage = Math.min(recordPage, recordPages);
+  const pageStart = (safeRecordPage - 1) * recordPageSize;
+  const visibleRecords = recordList.slice(pageStart, pageStart + recordPageSize);
   const seaCount = useMemo(() => rows.filter((r) => Number(r.truck_delivery) !== 1).length, [rows]);
   const landCount = rows.length - seaCount;
   // Land-only view drops the Supplier / Gear columns; everything else shows all columns
@@ -1358,33 +1279,24 @@ export default function LandingsPage() {
   const segmented = "inline-flex rounded-md bg-slate-100 p-1";
   const selectOptions = (list: string[]) => list.map((s) => <option key={s}>{s}</option>);
 
-  // Buttons that sit on the dark header
-  const headerBtn =
-    "inline-flex items-center gap-2 rounded-md border border-white/25 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60 disabled:cursor-not-allowed disabled:opacity-50";
-
   return (
-    <div className="space-y-6">
-      {/* Header: solid colour, no blur layers (same as the dashboard) */}
-      <section className="flex flex-wrap items-center justify-between gap-5 rounded-xl bg-[#12344d] p-6 text-white">
-        <div className="flex items-center gap-4">
-          <span className="grid h-11 w-11 shrink-0 place-items-center rounded-lg bg-white/10 text-white">
-            <Ship size={22} />
-          </span>
-          <div>
-            <h1 className="text-2xl font-semibold tracking-tight">Fish landings</h1>
-            <p className="mt-1 text-sm text-slate-300">
-              Every recorded unloading and land delivery
-              {month !== "0" ? ` in ${periodLabel}` : filters.year ? ` in ${filters.year}` : " across all years"}.
-            </p>
-          </div>
+    <div className="space-y-5">
+      <section className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[#0875d1]">Landing operations</p>
+          <h1 className="mt-1 text-2xl font-semibold tracking-tight text-[#14263d] sm:text-[28px]">Fish Landings</h1>
+          <p className="mt-1 text-sm text-slate-500">
+            Review, record and export every sea and land delivery
+            {month !== "0" ? ` for ${periodLabel}` : filters.year ? ` for ${filters.year}` : " across all years"}.
+          </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-3">
+        <div className="flex flex-wrap items-center gap-2">
           <select
             aria-label="Year"
             value={filters.year}
             onChange={(e) => changeYear(e.target.value)}
-            className="rounded-md border border-white/25 bg-transparent px-3 py-2.5 text-sm font-medium text-white focus:outline-none focus-visible:border-white/60 [&>option]:text-slate-900"
+            className={`${inputCls} !w-auto min-w-28`}
           >
             <option value="">All years</option>
             {yearOptions.map((y) => (
@@ -1392,10 +1304,15 @@ export default function LandingsPage() {
             ))}
           </select>
 
+          <select aria-label="Month" value={month} onChange={(e) => selectMonth(e.target.value)} className={`${inputCls} !w-auto min-w-32`}>
+            <option value="0">All months</option>
+            {MONTHS.map((name, index) => <option key={name} value={String(index + 1)}>{name}</option>)}
+          </select>
+
           <button
             type="button"
             onClick={showAll}
-            className={headerBtn}
+            className={ghostBtn}
             title="Clear every filter and show all landings from all years"
           >
             Show all
@@ -1409,48 +1326,23 @@ export default function LandingsPage() {
               setExportOpen(true);
             }}
             disabled={loading}
-            className={headerBtn}
+            className={ghostBtn}
             title="Export landings to Excel or PDF"
           >
-            <Download size={16} /> Export
+            <Download size={16} /> Export <ChevronDown size={14} />
           </button>
 
           <button
             onClick={openNewEntry}
-            className="inline-flex items-center gap-2 rounded-md bg-white px-4 py-2.5 text-sm font-medium text-[#12344d] hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60"
+            className={primaryBtn}
           >
-            <Plus size={16} /> New entry
+            <Plus size={16} /> Record a landing
           </button>
         </div>
       </section>
 
-      {/* Month filter */}
-      <section className={`${card} flex items-center gap-2 p-2`}>
-        <span className="ml-2 hidden shrink-0 items-center gap-1.5 text-sm font-medium text-slate-700 sm:inline-flex">
-          <CalendarDays size={16} /> Month
-        </span>
-        <div className="flex min-w-0 flex-1 gap-1.5 overflow-x-auto" role="group" aria-label="Filter by month">
-          {[{ v: "0", l: "All months" }, ...MONTHS_SHORT.map((l, i) => ({ v: String(i + 1), l }))].map((o) => {
-            const active = month === o.v;
-            return (
-              <button
-                key={o.v}
-                type="button"
-                onClick={() => selectMonth(o.v)}
-                aria-pressed={active}
-                className={`shrink-0 rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
-                  active ? "bg-sky-600 text-white" : "text-slate-700 hover:bg-slate-100"
-                }`}
-              >
-                {o.l}
-              </button>
-            );
-          })}
-        </div>
-      </section>
-
       {/* Summary of what is currently shown, compared with the previous period */}
-      <section className="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-4">
+      <section className="grid grid-cols-2 gap-3 sm:gap-4 xl:grid-cols-4">
         <button type="button" onClick={() => goToRecords()} className={cardBtn} aria-label="Go to landing records">
           <KpiCard
             label="Landings shown"
@@ -1470,6 +1362,7 @@ export default function LandingsPage() {
           <KpiCard
             label="Value shown"
             value={formatPeso(totalValue)}
+            compactValue={`₱${compactNumber(totalValue)}`}
             icon={Wallet}
             tone="green"
             hint={rejectedCount > 0 ? "Excludes rejected" : "Sum of total value"}
@@ -1485,6 +1378,7 @@ export default function LandingsPage() {
           <KpiCard
             label="Volume shown"
             value={`${Math.round(cur.volume).toLocaleString()} kg`}
+            compactValue={`${compactNumber(cur.volume)} kg`}
             icon={Scale}
             tone="violet"
             hint={rejectedCount > 0 ? "Excludes rejected" : "Total landed volume"}
@@ -1833,7 +1727,7 @@ export default function LandingsPage() {
                       key={v}
                       type="button"
                       aria-pressed={cardFilters.route === v}
-                      onClick={() => setCardFilters({ ...cardFilters, route: v })}
+                      onClick={() => updateCardFilters({ route: v })}
                       className={pill(cardFilters.route === v)}
                     >
                       {Icon && <Icon size={14} />}
@@ -1860,15 +1754,15 @@ export default function LandingsPage() {
             <div className="grid shrink-0 grid-cols-1 gap-2 border-b border-slate-200 bg-white p-3 sm:grid-cols-2 lg:grid-cols-[minmax(180px,1fr)_150px_180px_180px]">
               <RecordSearchInput
                 value={cardFilters.search}
-                onSearch={(search) => setCardFilters((current) => ({ ...current, search }))}
+                onSearch={(search) => updateCardFilters({ search })}
               />
-              <select aria-label="Status filter" className={inputCls} value={cardFilters.status} onChange={(e) => setCardFilters({ ...cardFilters, status: e.target.value })}>
+              <select aria-label="Status filter" className={inputCls} value={cardFilters.status} onChange={(e) => updateCardFilters({ status: e.target.value })}>
                 <option value="">All statuses</option><option value="pending">Pending</option><option value="approved">Approved</option><option value="rejected">Rejected</option>
               </select>
-              <select aria-label="Species filter" className={inputCls} value={cardFilters.species} onChange={(e) => setCardFilters({ ...cardFilters, species: e.target.value })}>
+              <select aria-label="Species filter" className={inputCls} value={cardFilters.species} onChange={(e) => updateCardFilters({ species: e.target.value })}>
                 <option value="">All species</option>{selectOptions(options.species)}
               </select>
-              <select aria-label="Sort records" className={inputCls} value={cardFilters.sort} onChange={(e) => setCardFilters({ ...cardFilters, sort: e.target.value })}>
+              <select aria-label="Sort records" className={inputCls} value={cardFilters.sort} onChange={(e) => updateCardFilters({ sort: e.target.value })}>
                 <option value="newest">Newest first</option><option value="oldest">Oldest first</option><option value="value_desc">Highest value</option><option value="value_asc">Lowest value</option><option value="volume_desc">Largest volume</option><option value="volume_asc">Smallest volume</option><option value="supplier">Supplier A–Z</option>
               </select>
             </div>
@@ -1879,7 +1773,9 @@ export default function LandingsPage() {
               <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
                 {/* Mobile cards */}
                 <ul className="divide-y divide-slate-100 md:hidden">
-                  {recordList.map((r) => (
+                  {visibleRecords.map((r) => {
+                    const expanded = expandedRows.has(r.id);
+                    return (
                     <li key={r.id} className="space-y-3 p-4">
                       <div className="flex items-start justify-between gap-3">
                         <div className="flex min-w-0 items-center gap-3">
@@ -1898,23 +1794,33 @@ export default function LandingsPage() {
                         {r.origin && <span className="text-xs text-slate-600">from {r.origin}</span>}
                         {r.plate_number && <PlateChip plate={r.plate_number} />}
                       </div>
-                      <div className="grid grid-cols-2 gap-3 rounded-md bg-slate-50 p-3 text-sm">
+                      <button
+                        type="button"
+                        aria-expanded={expanded}
+                        onClick={() => toggleExpanded(r.id)}
+                        className="flex w-full items-center justify-between rounded-lg border border-slate-200 px-3 py-2 text-left text-xs font-medium text-slate-700"
+                      >
+                        {expanded ? "Hide details" : "View details"}
+                        <ChevronDown size={15} className={`transition-transform ${expanded ? "rotate-180" : ""}`} />
+                      </button>
+                      {expanded && <div className="grid grid-cols-2 gap-3 rounded-md bg-slate-50 p-3 text-sm">
                         <div><p className="text-xs text-slate-500">Volume</p><p className="font-medium">{Number(r.volume).toLocaleString()} {r.unit}</p></div>
                         <div><p className="text-xs text-slate-500">Total value</p><p className="font-semibold">{formatPeso(r.total_value)}</p></div>
                         <div><p className="text-xs text-slate-500">Price per kg</p><p className="font-medium">{r.price_per_kg ? formatPeso(r.price_per_kg) : dash}</p></div>
                         <div><p className="text-xs text-slate-500">Broker</p><p className="break-words font-medium">{val(r.broker)}</p></div>
                         <div><p className="text-xs text-slate-500">Registered owner</p><p className="break-words font-medium">{val(r.boat_owner)}</p></div>
                         <div><p className="text-xs text-slate-500">Fishing gear</p><p className="break-words font-medium">{val(r.fishing_gear)}</p></div>
-                      </div>
+                      </div>}
                       {canEdit && <ReviewActions status={r.status} onEdit={() => setEditing(r)} onReview={isAdmin ? (status) => review(r, status) : undefined} onDelete={isAdmin ? () => setDeleting(r) : undefined} labelled />}
                     </li>
-                  ))}
+                    );
+                  })}
                 </ul>
 
                 {/* Desktop table */}
                 <div className="hidden overflow-x-auto md:block">
                   <table className={`w-full ${recordMinW} text-left text-sm`}>
-                    <thead className="bg-slate-50">
+                    <thead className="sticky top-0 z-10 bg-slate-50 shadow-[0_1px_0_#e2e8f0]">
                       <tr>
                         {recordCols.map((c, i) => (
                           <SortTh
@@ -1931,7 +1837,7 @@ export default function LandingsPage() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
-                      {recordList.map((r) => (
+                      {visibleRecords.map((r) => (
                         <tr key={r.id} className="hover:bg-slate-50">
                           {recordCols.map((c, i) => (
                             <td
@@ -1955,6 +1861,45 @@ export default function LandingsPage() {
                       ))}
                     </tbody>
                   </table>
+                </div>
+              </div>
+            )}
+
+            {recordList.length > 0 && (
+              <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-t border-slate-200 bg-white px-4 py-3 text-xs text-slate-600">
+                <div className="flex items-center gap-2">
+                  <span>
+                    Showing {pageStart + 1}-{Math.min(pageStart + recordPageSize, recordList.length)} of {recordList.length}
+                  </span>
+                  <select
+                    aria-label="Rows per page"
+                    value={recordPageSize}
+                    onChange={(e) => { setRecordPageSize(Number(e.target.value)); setRecordPage(1); }}
+                    className="rounded-md border border-slate-200 bg-white px-2 py-1 text-xs text-slate-700"
+                  >
+                    {[25, 50, 100].map((size) => <option key={size} value={size}>{size} rows</option>)}
+                  </select>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span>Page {safeRecordPage} of {recordPages}</span>
+                  <button
+                    type="button"
+                    aria-label="Previous page"
+                    disabled={safeRecordPage === 1}
+                    onClick={() => setRecordPage((page) => Math.max(1, page - 1))}
+                    className="grid h-8 w-8 place-items-center rounded-md border border-slate-200 hover:bg-slate-50 disabled:opacity-40"
+                  >
+                    <ChevronLeft size={15} />
+                  </button>
+                  <button
+                    type="button"
+                    aria-label="Next page"
+                    disabled={safeRecordPage === recordPages}
+                    onClick={() => setRecordPage((page) => Math.min(recordPages, page + 1))}
+                    className="grid h-8 w-8 place-items-center rounded-md border border-slate-200 hover:bg-slate-50 disabled:opacity-40"
+                  >
+                    <ChevronRight size={15} />
+                  </button>
                 </div>
               </div>
             )}

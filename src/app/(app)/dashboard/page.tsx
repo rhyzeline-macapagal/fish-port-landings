@@ -3,15 +3,13 @@
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import {
-  Package, Wallet, Clock, Plus, Fish, Ship, X,
-  ArrowUpRight, ArrowDownRight, Minus, CalendarDays,
+  Wallet, Clock, Plus, Fish, Ship, X, LoaderCircle,
 } from "lucide-react";
-import type { LucideIcon } from "lucide-react";
 import { api, formatDate, formatKg, formatPeso, Landing } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
 import { useEntryModal } from "@/context/EntryModalContext";
+import KpiCard from "@/components/KpiCard";
 import StatusBadge from "@/components/StatusBadge";
-import { ghostBtn } from "@/components/ui";
 import ExportMenu, { type ExportKind } from "@/components/ExportMenu";
 import type { Report } from "@/lib/export"; // type only: the export library itself loads on demand
 
@@ -27,16 +25,20 @@ import type { Report } from "@/lib/export"; // type only: the export library its
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const MONTHS_SHORT = MONTHS.map((m) => m.slice(0, 3));
 
-const TONES = {
-  blue:   { chip: "bg-sky-50 text-sky-600",         hex: "#0ea5e9" },
-  green:  { chip: "bg-emerald-50 text-emerald-600", hex: "#10b981" },
-  yellow: { chip: "bg-amber-50 text-amber-600",     hex: "#f59e0b" },
-  violet: { chip: "bg-violet-50 text-violet-600",   hex: "#8b5cf6" },
-} as const;
-type Tone = keyof typeof TONES;
-
-const card = "rounded-xl border border-slate-200 bg-white shadow-sm";
+const card = "rounded-xl border border-slate-200 bg-white shadow-[0_2px_10px_rgba(18,52,77,0.05)]";
 const num = (v: unknown) => Number(v ?? 0);
+const formatSummaryPeso = (value: unknown) => new Intl.NumberFormat("en-PH", {
+  style: "currency",
+  currency: "PHP",
+  maximumFractionDigits: 0,
+}).format(num(value));
+const formatCompactPeso = (value: unknown) => new Intl.NumberFormat("en-PH", {
+  style: "currency",
+  currency: "PHP",
+  notation: "compact",
+  maximumFractionDigits: 1,
+}).format(num(value));
+const SPECIES_COLORS = ["#0875d1", "#1a8cc7", "#34b981", "#f4b740", "#64748b", "#ef5d50"];
 
 interface PrevTotals {
   total_landings: number | string;
@@ -69,6 +71,7 @@ interface DashboardData {
 
 type SpeciesRow = { name: string; volume: number };
 type MonthPoint = { label: string; full: string; volume: number; landings: number; amount: number };
+type SpeciesSlice = SpeciesRow & { percentage: number; color: string };
 
 /* ----------------------------- small pieces ----------------------------- */
 
@@ -98,102 +101,6 @@ function Empty({ icon: Icon, title, text, height = "h-56" }: { icon: typeof Fish
   );
 }
 
-// "5.2% higher" / "3.1% lower" pill
-function Trend({ current, previous, dark = false }: { current: number; previous?: number | null; dark?: boolean }) {
-  if (previous == null) return null;
-
-  let kind: "up" | "down" | "flat";
-  let text: string;
-  if (previous === 0) {
-    if (current === 0) { kind = "flat"; text = "No change"; }
-    else { kind = "up"; text = "New activity"; }
-  } else {
-    const pct = ((current - previous) / previous) * 100;
-    if (Math.abs(pct) < 0.05) { kind = "flat"; text = "No change"; }
-    else if (pct > 0) { kind = "up"; text = `${pct.toFixed(1)}% higher`; }
-    else { kind = "down"; text = `${Math.abs(pct).toFixed(1)}% lower`; }
-  }
-
-  const styles = dark
-    ? { up: "bg-emerald-400/20 text-emerald-200", down: "bg-rose-400/20 text-rose-200", flat: "bg-white/15 text-slate-200" }
-    : { up: "bg-emerald-50 text-emerald-700", down: "bg-rose-50 text-rose-700", flat: "bg-slate-100 text-slate-600" };
-  const Icon = kind === "up" ? ArrowUpRight : kind === "down" ? ArrowDownRight : Minus;
-
-  return (
-    <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold ${styles[kind]}`}>
-      <Icon size={13} /> {text}
-    </span>
-  );
-}
-
-// Tiny inline-SVG sparkline (replaces a full chart instance per card)
-function Sparkline({ values, color }: { values: number[]; color: string }) {
-  const max = Math.max(...values);
-  if (max <= 0) return null;
-  const w = 100, h = 28;
-  const step = w / (values.length - 1);
-  const points = values
-    .map((v, i) => `${(i * step).toFixed(1)},${(h - 2 - (v / max) * (h - 4)).toFixed(1)}`)
-    .join(" ");
-  return (
-    <svg viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" className="mt-3 h-8 w-full" aria-hidden="true">
-      <polyline
-        points={points}
-        fill="none"
-        stroke={color}
-        strokeWidth={2}
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        vectorEffect="non-scaling-stroke"
-      />
-    </svg>
-  );
-}
-
-const KpiCard = memo(function KpiCard({
-  label, value, icon: Icon, tone, hint, loading, current, previous, compareLabel, spark, highlight,
-}: {
-  label: string;
-  value: string;
-  icon: LucideIcon;
-  tone: Tone;
-  hint: string;
-  loading?: boolean;
-  current?: number;
-  previous?: number | null;
-  compareLabel?: string;
-  spark?: number[];
-  highlight?: boolean;
-}) {
-  const t = TONES[tone];
-  return (
-    <div className={`${card} h-full p-5 ${highlight ? "border-amber-300 ring-1 ring-amber-300" : ""}`}>
-      <div className="flex items-center justify-between gap-3">
-        <p className="text-sm font-medium text-slate-700">{label}</p>
-        <span className={`grid h-9 w-9 shrink-0 place-items-center rounded-lg ${t.chip}`}>
-          <Icon size={18} />
-        </span>
-      </div>
-
-      {loading ? (
-        <div className="mt-3 h-8 w-32 animate-pulse rounded bg-slate-100" />
-      ) : (
-        <p className="mt-2 break-words text-2xl font-semibold tabular-nums text-slate-900">{value}</p>
-      )}
-
-      {!loading && current !== undefined && previous !== undefined && (
-        <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1">
-          <Trend current={current} previous={previous} />
-          {compareLabel && <span className="text-xs text-slate-600">{compareLabel}</span>}
-        </div>
-      )}
-
-      <p className="mt-2 text-xs text-slate-600">{hint}</p>
-      {!loading && spark && <Sparkline values={spark} color={t.hex} />}
-    </div>
-  );
-});
-
 // Pure-CSS monthly bars. Each bar is a button: click to filter by that month.
 const MonthlyBars = memo(function MonthlyBars({
   data, selected, onSelect,
@@ -202,39 +109,65 @@ const MonthlyBars = memo(function MonthlyBars({
   selected: number;
   onSelect: (n: number) => void;
 }) {
-  const max = Math.max(...data.map((d) => d.volume), 1);
+  const rawMax = Math.max(...data.map((d) => d.volume), 1);
+  const magnitude = 10 ** Math.floor(Math.log10(rawMax));
+  const normalized = rawMax / magnitude;
+  const nice = normalized <= 1 ? 1 : normalized <= 2 ? 2 : normalized <= 5 ? 5 : 10;
+  const max = nice * magnitude;
+  const tickLabels = [max, max * 0.75, max * 0.5, max * 0.25, 0];
+  const compact = (value: number) => {
+    if (value >= 1_000_000) return `${Number((value / 1_000_000).toFixed(1))}M`;
+    if (value >= 1_000) return `${Number((value / 1_000).toFixed(1))}K`;
+    return Math.round(value).toLocaleString();
+  };
+
   return (
-    <div className="flex h-full items-stretch gap-1.5 sm:gap-2" role="group" aria-label="Monthly volume">
-      {data.map((d, i) => {
-        const active = selected === i + 1;
-        const dim = selected !== 0 && !active;
-        const pct = d.volume > 0 ? Math.max((d.volume / max) * 100, 3) : 0;
-        return (
-          <button
-            key={d.label}
-            type="button"
-            onClick={() => onSelect(i + 1)}
-            aria-pressed={active}
-            aria-label={`${d.full}: ${formatKg(d.volume)}`}
-            title={`${d.full}: ${formatKg(d.volume)}`}
-            className="group flex min-w-0 flex-1 flex-col focus-visible:outline-none"
-          >
-            <span className="flex flex-1 items-end">
-              <span
-                className={`w-full rounded-t-md transition-colors group-focus-visible:ring-2 group-focus-visible:ring-sky-500 ${
-                  d.volume === 0
-                    ? "h-0.5 bg-slate-200"
-                    : dim
-                      ? "bg-slate-200 group-hover:bg-sky-300"
-                      : "bg-sky-500 group-hover:bg-sky-600"
-                }`}
-                style={d.volume > 0 ? { height: `${pct}%` } : undefined}
-              />
-            </span>
-            <span className={`mt-2 text-xs ${active ? "font-semibold text-slate-900" : "text-slate-600"}`}>{d.label}</span>
-          </button>
-        );
-      })}
+    <div className="flex h-full min-w-0" role="group" aria-label="Monthly landing volume in kilograms">
+      <div className="flex w-10 shrink-0 flex-col justify-between pb-7 pr-2 text-right text-[9px] tabular-nums text-slate-400 sm:w-12 sm:text-[10px]">
+        {tickLabels.map((tick) => <span key={tick}>{compact(tick)}</span>)}
+      </div>
+      <div className="relative flex min-w-0 flex-1 gap-1 sm:gap-2">
+        <div className="pointer-events-none absolute inset-x-0 bottom-7 top-0 flex flex-col justify-between" aria-hidden="true">
+          {tickLabels.map((tick) => <span key={tick} className="border-t border-dashed border-slate-200" />)}
+        </div>
+        {data.map((d, i) => {
+          const active = selected === i + 1;
+          const dim = selected !== 0 && !active;
+          const percentage = d.volume > 0 ? Math.max((d.volume / max) * 100, 2) : 0;
+          return (
+            <button
+              key={d.label}
+              type="button"
+              onClick={() => onSelect(i + 1)}
+              aria-pressed={active}
+              aria-label={`${d.full}: ${formatKg(d.volume)} across ${d.landings.toLocaleString()} landings`}
+              className="group relative z-10 flex min-w-0 flex-1 flex-col focus-visible:outline-none"
+            >
+              <span className="relative flex flex-1 items-end justify-center">
+                <span
+                  className={`relative w-[72%] max-w-8 rounded-t-sm transition-colors group-focus-visible:ring-2 group-focus-visible:ring-[#0875d1] ${
+                    d.volume === 0
+                      ? "h-px bg-slate-300"
+                      : dim
+                        ? "bg-sky-200 group-hover:bg-sky-300"
+                        : "bg-[#48aaf0] group-hover:bg-[#0875d1]"
+                  }`}
+                  style={d.volume > 0 ? { height: `${percentage}%` } : undefined}
+                >
+                  {d.volume > 0 && (
+                    <span className="pointer-events-none absolute -top-11 left-1/2 z-20 hidden -translate-x-1/2 whitespace-nowrap rounded-md bg-[#12344d] px-2 py-1 text-[9px] font-medium text-white opacity-0 shadow-lg transition-opacity group-hover:block group-hover:opacity-100 group-focus-visible:block group-focus-visible:opacity-100 sm:text-[10px]">
+                      {formatKg(d.volume)}
+                    </span>
+                  )}
+                </span>
+              </span>
+              <span className={`flex h-7 items-end justify-center text-[9px] sm:text-[10px] ${active ? "font-semibold text-[#0875d1]" : "text-slate-500"}`}>
+                {d.label}
+              </span>
+            </button>
+          );
+        })}
+      </div>
     </div>
   );
 });
@@ -256,6 +189,47 @@ function SpeciesBar({ name, volume, pct, rank }: { name: string; volume?: number
         <div className="h-full rounded-full bg-sky-500" style={{ width: `${pct}%` }} />
       </div>
     </li>
+  );
+}
+
+function DashboardSkeleton({ className = "h-64" }: { className?: string }) {
+  return (
+    <div className={`${className} animate-pulse rounded-lg bg-slate-100`} aria-label="Loading dashboard data" />
+  );
+}
+
+function SpeciesDonut({ slices, total }: { slices: SpeciesSlice[]; total: number }) {
+  const gradient = slices.map((slice, index) => {
+    const start = slices.slice(0, index).reduce((sum, item) => sum + item.percentage, 0);
+    const end = start + slice.percentage;
+    return `${slice.color} ${start}% ${end}%`;
+  }).join(", ");
+
+  return (
+    <div className="mt-4 flex flex-col items-center gap-5 sm:flex-row xl:flex-col 2xl:flex-row">
+      <div
+        role="img"
+        aria-label={`Species share chart. ${slices.map((slice) => `${slice.name} ${slice.percentage.toFixed(1)} percent`).join(", ")}`}
+        className="relative grid h-32 w-32 shrink-0 place-items-center rounded-full"
+        style={{ background: `conic-gradient(${gradient})` }}
+      >
+        <div className="grid h-[76px] w-[76px] place-items-center rounded-full bg-white text-center shadow-inner">
+          <div>
+            <p className="text-sm font-semibold tabular-nums text-[#14263d]">{Math.round(total).toLocaleString()}</p>
+            <p className="text-[9px] text-slate-500">kg total</p>
+          </div>
+        </div>
+      </div>
+      <ul className="w-full min-w-0 space-y-2.5">
+        {slices.map((slice) => (
+          <li key={slice.name} className="flex items-center gap-2 text-[10px]">
+            <span className="h-2 w-2 shrink-0 rounded-sm" style={{ background: slice.color }} />
+            <span className="min-w-0 flex-1 truncate font-medium text-slate-700">{slice.name}</span>
+            <span className="shrink-0 tabular-nums text-slate-500">{slice.percentage.toFixed(0)}%</span>
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }
 
@@ -325,6 +299,24 @@ export default function DashboardPage() {
     [data]
   );
   const speciesTotal = useMemo(() => species.reduce((sum, s) => sum + s.volume, 0), [species]);
+  const speciesSlices = useMemo<SpeciesSlice[]>(() => {
+    if (!speciesTotal) return [];
+    const visible = species.slice(0, 5).map((item, index) => ({
+      ...item,
+      percentage: (item.volume / speciesTotal) * 100,
+      color: SPECIES_COLORS[index],
+    }));
+    if (species.length > 5) {
+      const otherVolume = species.slice(5).reduce((sum, item) => sum + item.volume, 0);
+      visible.push({
+        name: "Others",
+        volume: otherVolume,
+        percentage: (otherVolume / speciesTotal) * 100,
+        color: SPECIES_COLORS[5],
+      });
+    }
+    return visible;
+  }, [species, speciesTotal]);
   const topSpecies = species.length
     ? species.reduce((best, s) => (s.volume > best.volume ? s : best))
     : null;
@@ -344,16 +336,14 @@ export default function DashboardPage() {
     }),
     [monthly]
   );
-  const peak = useMemo(
-    () => monthly.reduce((best, r) => (r.volume > best.volume ? r : best), monthly[0]),
-    [monthly]
-  );
   const noMonthlyData = monthly.every((r) => r.volume === 0);
 
   const recent = data?.recent ?? [];
   const pending = num(data?.pending_review);
   const firstName = user?.full_name.split(" ")[0] ?? "";
-  const today = new Date().toLocaleDateString("en-PH", { weekday: "long", month: "long", day: "numeric" });
+  const now = new Date();
+  const today = now.toLocaleDateString("en-PH", { weekday: "long", month: "long", day: "numeric", year: "numeric" });
+  const greeting = now.getHours() < 12 ? "Good morning" : now.getHours() < 18 ? "Good afternoon" : "Good evening";
   const canAdd = user?.role !== "viewer";
 
   // Current vs previous period
@@ -432,93 +422,61 @@ export default function DashboardPage() {
   }
 
   const monthOptions = [
-    { v: "0", l: "All months", has: true },
-    ...MONTHS_SHORT.map((l, i) => ({ v: String(i + 1), l, has: monthly[i].landings > 0 })),
+    { v: "0", l: "All months" },
+    ...MONTHS.map((label, index) => ({ v: String(index + 1), l: label })),
   ];
 
   return (
-    <div className={`space-y-6 transition-opacity ${fetching && data ? "opacity-70" : ""}`}>
-      {/* Header: solid colour, no blur layers */}
-      <section className="flex flex-wrap items-end justify-between gap-5 rounded-xl bg-[#12344d] p-6 text-white">
-        <div>
-          <p className="text-sm text-slate-300">{today}. Welcome back, {firstName}.</p>
-          <p className="mt-5 text-sm text-slate-300">Total volume landed in {periodLabel}</p>
-          {loading ? (
-            <div className="mt-2 h-10 w-56 animate-pulse rounded bg-white/10" />
-          ) : (
-            <div className="mt-1 flex flex-wrap items-center gap-3">
-              <p className="text-4xl font-semibold tabular-nums">{formatKg(data?.total_volume ?? 0)}</p>
-              <Trend current={cur.volume} previous={prev?.volume} dark />
-              <span className="text-xs text-slate-300">{compareLabel}</span>
-            </div>
-          )}
+    <div className="space-y-5" aria-busy={fetching}>
+      <section className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <h2 className="text-xl font-semibold tracking-tight text-[#14263d] sm:text-2xl">{greeting}, {firstName}!</h2>
+            {fetching && data && <LoaderCircle size={16} className="animate-spin text-[#1a8cc7]" aria-label="Updating dashboard" />}
+          </div>
+          <p className="mt-1 text-sm text-slate-500">Here&apos;s what&apos;s happening at Mercedes FishPort today.</p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-3">
-          <select
-            aria-label="Year"
-            value={year}
-            onChange={(e) => setYear(e.target.value)}
-            className="rounded-md border border-white/25 bg-transparent px-3 py-2.5 text-sm font-medium text-white focus:outline-none focus-visible:border-white/60 [&>option]:text-slate-900"
-          >
-            {yearOptions.map((y) => (
-              <option key={y} value={y}>{y}</option>
-            ))}
-          </select>
-
-          <ExportMenu
-            variant="glass"
-            up
-            onExport={exportDashboard}
-            disabled={!data}
-            title={`Download the ${periodLabel} dashboard`}
-          />
-
-          {canAdd && (
-            <button
-              onClick={openNewEntry}
-              className="inline-flex items-center gap-2 rounded-md bg-white px-4 py-2.5 text-sm font-medium text-[#12344d] hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60"
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center xl:justify-end">
+          <p className="whitespace-nowrap text-xs font-medium text-slate-500">{today}</p>
+          <div className="flex flex-wrap items-center gap-2">
+            <select
+              aria-label="Reporting year"
+              value={year}
+              onChange={(event) => setYear(event.target.value)}
+              className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-xs font-medium text-[#14263d] shadow-sm outline-none focus:border-[#1a8cc7] focus:ring-2 focus:ring-[#1a8cc7]/15"
             >
-              <Plus size={16} /> Record a landing
-            </button>
-          )}
-        </div>
-      </section>
-
-      {/* Month filter */}
-      <section className={`${card} flex items-center gap-2 p-2`}>
-        <span className="ml-2 hidden shrink-0 items-center gap-1.5 text-sm font-medium text-slate-700 sm:inline-flex">
-          <CalendarDays size={16} /> Month
-        </span>
-        <div className="flex min-w-0 flex-1 gap-1.5 overflow-x-auto" role="group" aria-label="Filter by month">
-          {monthOptions.map((o) => {
-            const active = month === o.v;
-            return (
+              {yearOptions.map((option) => <option key={option} value={option}>{option}</option>)}
+            </select>
+            <select
+              aria-label="Reporting month"
+              value={month}
+              onChange={(event) => setMonth(event.target.value)}
+              className="h-10 min-w-32 rounded-lg border border-slate-200 bg-white px-3 text-xs font-medium text-[#14263d] shadow-sm outline-none focus:border-[#1a8cc7] focus:ring-2 focus:ring-[#1a8cc7]/15"
+            >
+              {monthOptions.map((option) => <option key={option.v} value={option.v}>{option.l}</option>)}
+            </select>
+            <ExportMenu onExport={exportDashboard} disabled={!data} title={`Download the ${periodLabel} dashboard`} />
+            {canAdd && (
               <button
-                key={o.v}
-                onClick={() => setMonth(o.v)}
-                aria-pressed={active}
-                className={`shrink-0 rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
-                  active
-                    ? "bg-sky-600 text-white"
-                    : `text-slate-700 hover:bg-slate-100 ${o.has ? "" : "opacity-50"}`
-                }`}
+                type="button"
+                onClick={openNewEntry}
+                className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-[#0875d1] px-4 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-[#1a8cc7] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1a8cc7]/40"
               >
-                {o.l}
+                <Plus size={15} /> Record a Landing
               </button>
-            );
-          })}
+            )}
+          </div>
         </div>
       </section>
 
-      {error && <p className="rounded-md bg-red-50 px-4 py-3 text-sm text-red-700 ring-1 ring-red-200">{error}</p>}
+      {error && <p role="alert" className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p>}
 
-      {/* Stat cards */}
-      <section className="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-4">
+      <section aria-label="Dashboard summary" className="grid grid-cols-2 gap-3 lg:grid-cols-4 lg:gap-4">
         <KpiCard
           label="Total landings"
-          value={String(cur.landings)}
-          icon={Package}
+          value={cur.landings.toLocaleString()}
+          icon={Ship}
           tone="blue"
           hint={`Recorded in ${periodLabel}`}
           loading={loading}
@@ -529,7 +487,8 @@ export default function DashboardPage() {
         />
         <KpiCard
           label="Total value"
-          value={formatPeso(data?.total_value ?? 0)}
+          value={formatSummaryPeso(data?.total_value)}
+          compactValue={formatCompactPeso(data?.total_value)}
           icon={Wallet}
           tone="green"
           hint={`Across all ${periodLabel} landings`}
@@ -580,24 +539,21 @@ export default function DashboardPage() {
         />
       </section>
 
-      {/* Monthly volume + species share (one row, no chart library) */}
-      <section className="grid grid-cols-1 gap-5 lg:grid-cols-5">
-        <div className={`${card} p-6 lg:col-span-3`}>
+      <section aria-label="Landing analytics" className="grid grid-cols-1 gap-4 lg:grid-cols-2 xl:grid-cols-12">
+        <div className={`${card} p-5 lg:col-span-2 xl:col-span-6`}>
           <CardHeader
-            title="Monthly volume"
-            subtitle={
-              !noMonthlyData && peak
-                ? `Peak in ${year}: ${peak.full}, ${formatKg(peak.volume)}. Click a bar to filter.`
-                : `Kilograms landed per month in ${year}.`
-            }
+            title={`Monthly Landing Volume (${year})`}
+            subtitle="Volume in kilograms. Select a bar to filter the dashboard."
             right={
               m ? (
-                <button onClick={() => setMonth("0")} className={ghostBtn}>Clear {MONTHS_SHORT[m - 1]}</button>
+                <button onClick={() => setMonth("0")} className="shrink-0 text-xs font-semibold text-[#0875d1] hover:text-[#1a8cc7]">Clear {MONTHS_SHORT[m - 1]}</button>
               ) : undefined
             }
           />
-          <div className="mt-5 h-60">
-            {noMonthlyData ? (
+          <div className="mt-5 h-56 sm:h-64">
+            {loading ? (
+              <DashboardSkeleton className="h-full" />
+            ) : noMonthlyData ? (
               <Empty icon={Fish} title="No landings yet" text={`Nothing recorded in ${year}.`} height="h-full" />
             ) : (
               <MonthlyBars data={monthly} selected={m} onSelect={toggleMonth} />
@@ -605,85 +561,111 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        <div className={`${card} p-6 lg:col-span-2`}>
+        <div className={`${card} p-5 xl:col-span-3`}>
           <CardHeader
-            title="Species share"
-            subtitle={`Percent of ${periodLabel} volume`}
-            right={
-              species.length > 0 ? (
-                <span className="text-xs tabular-nums text-slate-600">{Math.round(speciesTotal).toLocaleString()} kg</span>
-              ) : undefined
-            }
+            title="Species Share"
+            subtitle={`Share of ${periodLabel} volume`}
           />
-          {species.length === 0 ? (
-            <Empty icon={Fish} title="Nothing to show" text="Shares appear after the first landing." />
+          {loading ? (
+            <DashboardSkeleton className="mt-4 h-56" />
+          ) : species.length === 0 ? (
+            <Empty icon={Fish} title="Nothing to show" text="Shares appear after the first landing." height="h-56" />
           ) : (
-            <>
-              <ul className="mt-5 space-y-4">
-                {species.slice(0, 6).map((s) => (
-                  <SpeciesBar
-                    key={s.name}
-                    name={s.name}
-                    pct={speciesTotal ? (s.volume / speciesTotal) * 100 : 0}
-                  />
-                ))}
-              </ul>
-              {species.length > 6 && (
-                <button onClick={() => setShowAllSpecies(true)} className={`${ghostBtn} mt-5 w-full justify-center`}>
-                  View all {species.length} species
-                </button>
-              )}
-            </>
+            <SpeciesDonut slices={speciesSlices} total={speciesTotal} />
+          )}
+        </div>
+
+        <div className={`${card} p-5 xl:col-span-3`}>
+          <CardHeader
+            title="Top 6 Species"
+            subtitle={`Highest volume in ${periodLabel}`}
+            right={species.length > 6 ? (
+              <button type="button" onClick={() => setShowAllSpecies(true)} className="shrink-0 text-xs font-semibold text-[#0875d1] hover:text-[#1a8cc7]">View all</button>
+            ) : undefined}
+          />
+          {loading ? (
+            <DashboardSkeleton className="mt-4 h-56" />
+          ) : species.length === 0 ? (
+            <Empty icon={Fish} title="No species yet" text="Rankings appear after landings are recorded." height="h-56" />
+          ) : (
+            <ol className="mt-3 divide-y divide-slate-100">
+              {species.slice(0, 6).map((item, index) => (
+                <li key={item.name} className="flex items-center gap-3 py-2.5">
+                  <span className={`grid h-6 w-6 shrink-0 place-items-center rounded-full text-[10px] font-semibold ${index < 3 ? "bg-amber-50 text-amber-700" : "bg-slate-100 text-slate-600"}`}>{index + 1}</span>
+                  <Fish size={17} className="shrink-0 text-[#1a8cc7]" aria-hidden="true" />
+                  <span className="min-w-0 flex-1 truncate text-xs font-medium text-slate-700">{item.name}</span>
+                  <span className="shrink-0 text-[11px] font-semibold tabular-nums text-[#14263d]">{Math.round(item.volume).toLocaleString()} kg</span>
+                </li>
+              ))}
+            </ol>
           )}
         </div>
       </section>
 
-      {/* Recent landings */}
       <section className={card}>
-        <div className="flex items-center justify-between gap-3 px-6 py-5">
+        <div className="flex items-center justify-between gap-3 px-5 py-4">
           <CardHeader title="Recent landings" subtitle={`The latest entries in ${periodLabel}`} />
-          {canAdd && <Link href="/landings" className={`${ghostBtn} shrink-0`}>View all</Link>}
+          {canAdd && <Link href="/landings" className="shrink-0 text-xs font-semibold text-[#0875d1] hover:text-[#1a8cc7]">View all landings</Link>}
         </div>
 
-        {recent.length === 0 ? (
+        {loading ? (
+          <div className="space-y-3 border-t border-slate-200 p-5">
+            {[0, 1, 2].map((row) => <DashboardSkeleton key={row} className="h-10" />)}
+          </div>
+        ) : recent.length === 0 ? (
           <div className="border-t border-slate-200">
             <Empty icon={Ship} title="No landings recorded yet" text="New entries show up here as soon as they are saved." />
           </div>
         ) : (
-          <div className="overflow-x-auto border-t border-slate-200">
-            <table className="w-full min-w-[720px] text-sm">
-              <thead className="bg-slate-50 text-left text-xs text-slate-600">
-                <tr>
-                  <th className="px-6 py-2.5 font-medium">Date</th>
-                  <th className="px-3 py-2.5 font-medium">Supplier</th>
-                  <th className="px-3 py-2.5 font-medium">Origin</th>
-                  <th className="px-3 py-2.5 font-medium">Species</th>
-                  <th className="px-3 py-2.5 text-right font-medium">Volume</th>
-                  <th className="px-3 py-2.5 text-right font-medium">Value</th>
-                  <th className="px-6 py-2.5 font-medium">Status</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {recent.map((r) => (
-                  <tr key={r.id} className="hover:bg-slate-50">
-                    <td className="whitespace-nowrap px-6 py-3 text-slate-700">{formatDate(r.landing_date)}</td>
-                    <td className="px-3 py-3 font-medium text-slate-900">{r.boat_name}</td>
-                    <td className="px-3 py-3 text-slate-700">{r.origin || "-"}</td>
-                    <td className="px-3 py-3 text-slate-800">{r.species}</td>
-                    <td className="whitespace-nowrap px-3 py-3 text-right tabular-nums text-slate-900">
-                      {Number(r.volume).toLocaleString()} {r.unit}
-                    </td>
-                    <td className="whitespace-nowrap px-3 py-3 text-right font-medium tabular-nums text-slate-900">
-                      {formatPeso(r.total_value)}
-                    </td>
-                    <td className="px-6 py-3">
-                      <StatusBadge status={r.status} />
-                    </td>
+          <>
+            <div className="hidden overflow-x-auto border-t border-slate-200 md:block">
+              <table className="w-full min-w-[760px] text-xs">
+                <thead className="bg-slate-50/80 text-left text-[10px] uppercase tracking-wide text-slate-500">
+                  <tr>
+                    <th className="px-5 py-2.5 font-semibold">Date</th>
+                    <th className="px-3 py-2.5 font-semibold">Supplier</th>
+                    <th className="px-3 py-2.5 font-semibold">Origin</th>
+                    <th className="px-3 py-2.5 font-semibold">Species</th>
+                    <th className="px-3 py-2.5 text-right font-semibold">Volume</th>
+                    <th className="px-3 py-2.5 text-right font-semibold">Total Value</th>
+                    <th className="px-5 py-2.5 font-semibold">Status</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {recent.map((record) => (
+                    <tr key={record.id} className="transition-colors hover:bg-slate-50/70">
+                      <td className="whitespace-nowrap px-5 py-3 text-slate-600">{formatDate(record.landing_date)}</td>
+                      <td className="px-3 py-3 font-medium text-[#14263d]">{record.boat_name}</td>
+                      <td className="px-3 py-3 text-slate-600">{record.origin || "-"}</td>
+                      <td className="px-3 py-3 text-slate-700">{record.species}</td>
+                      <td className="whitespace-nowrap px-3 py-3 text-right tabular-nums text-slate-700">{Number(record.volume).toLocaleString()} {record.unit}</td>
+                      <td className="whitespace-nowrap px-3 py-3 text-right font-semibold tabular-nums text-[#14263d]">{formatPeso(record.total_value)}</td>
+                      <td className="px-5 py-3"><StatusBadge status={record.status} /></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <ul className="divide-y divide-slate-100 border-t border-slate-200 md:hidden">
+              {recent.map((record) => (
+                <li key={record.id} className="p-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-semibold text-[#14263d]">{record.boat_name}</p>
+                      <p className="mt-0.5 text-[11px] text-slate-500">{formatDate(record.landing_date)}</p>
+                    </div>
+                    <StatusBadge status={record.status} />
+                  </div>
+                  <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 text-[11px]">
+                    <div><dt className="text-slate-400">Species</dt><dd className="mt-0.5 truncate font-medium text-slate-700">{record.species}</dd></div>
+                    <div><dt className="text-slate-400">Origin</dt><dd className="mt-0.5 truncate font-medium text-slate-700">{record.origin || "-"}</dd></div>
+                    <div><dt className="text-slate-400">Volume</dt><dd className="mt-0.5 font-medium tabular-nums text-slate-700">{Number(record.volume).toLocaleString()} {record.unit}</dd></div>
+                    <div><dt className="text-slate-400">Total value</dt><dd className="mt-0.5 font-semibold tabular-nums text-[#14263d]">{formatPeso(record.total_value)}</dd></div>
+                  </dl>
+                </li>
+              ))}
+            </ul>
+          </>
         )}
       </section>
 
