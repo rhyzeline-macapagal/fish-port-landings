@@ -36,12 +36,15 @@ import { ghostBtn, inputCls, primaryBtn } from "@/components/ui";
 
 type Size = "small" | "big";
 type Status = "active" | "inactive";
-type ApplicationStatus = "pending" | "approved" | "rejected";
+type ApplicationStatus = string;
 
 type Tenant = {
   id: number;
   category: TenantCategory;
   permit_number: string | null;
+  last_name?: string | null;
+  first_name?: string | null;
+  middle_name?: string | null;
   broker_size: Size | null;
   business_name: string;
   owner_name: string | null;
@@ -89,6 +92,71 @@ const emptyForm: FormState = {
 
 function sortTenants(rows: Tenant[]) {
   return [...rows].sort((a, b) => a.business_name.localeCompare(b.business_name));
+}
+
+function firstValue(source: Record<string, unknown>, ...keys: string[]) {
+  for (const key of keys) {
+    const value = source[key];
+    if (value !== null && value !== undefined && String(value).trim() !== "") return String(value).trim();
+  }
+  return null;
+}
+
+function normalizeTenant(raw: Tenant): Tenant {
+  const source = raw as unknown as Record<string, unknown>;
+  const normalizedKeys = Object.fromEntries(Object.entries(source).map(([key, value]) => [
+    key.replace(/([A-Z])/g, "_$1").toLowerCase(),
+    value,
+  ]));
+  const values = { ...source, ...normalizedKeys };
+  const applicationStatus = firstValue(values, "application_status", "permit_status", "application_state");
+  const status = firstValue(values, "status", "tenant_status")?.toLowerCase();
+
+  return {
+    ...raw,
+    permit_number: firstValue(values, "permit_number", "permit_no", "permit_id", "permit") ?? raw.permit_number ?? null,
+    application_status: applicationStatus || "—",
+    status: status === "inactive" ? "inactive" : "active",
+    last_name: firstValue(values, "last_name") ?? raw.last_name ?? null,
+    first_name: firstValue(values, "first_name") ?? raw.first_name ?? null,
+    middle_name: firstValue(values, "middle_name") ?? raw.middle_name ?? null,
+  };
+}
+
+function tenantRows(payload: unknown): Tenant[] {
+  if (Array.isArray(payload)) return payload as Tenant[];
+  if (!payload || typeof payload !== "object") return [];
+  const source = payload as Record<string, unknown>;
+  for (const key of ["data", "rows", "tenants", "records"]) {
+    if (Array.isArray(source[key])) return source[key] as Tenant[];
+  }
+  return [];
+}
+
+function ownerNameParts(tenant: Tenant) {
+  if (tenant.last_name || tenant.first_name || tenant.middle_name) {
+    return {
+      lastName: tenant.last_name || "—",
+      firstName: tenant.first_name || "—",
+      middleName: tenant.middle_name || "—",
+    };
+  }
+
+  const owner = (tenant.owner_name || "").trim();
+  if (!owner) return { lastName: "—", firstName: "—", middleName: "—" };
+
+  const [lastNamePart, givenNames = ""] = owner.split(",", 2).map((part) => part.trim());
+  if (givenNames) {
+    const [firstName, ...middleNames] = givenNames.split(/\s+/);
+    return { lastName: lastNamePart, firstName, middleName: middleNames.join(" ") || "—" };
+  }
+
+  const names = owner.split(/\s+/);
+  return {
+    lastName: names.at(-1) || "—",
+    firstName: names[0] || "—",
+    middleName: names.slice(1, -1).join(" ") || "—",
+  };
 }
 
 function FormField({
@@ -250,7 +318,7 @@ export default function TenantGroupPage({ group }: { group: TenantGroup }) {
   const canDelete = user?.role === "admin";
   const showBrokerSize = group.category === "fish_broker";
   const showStall = group.category !== "commercial_vessel_above_3t" && group.category !== "commercial_vessel_below_3t";
-  const columnCount = 8 + Number(showBrokerSize) + Number(showStall);
+  const columnCount = 7;
 
   const [tenants, setTenants] = useState<Tenant[]>([]);
   const [loading, setLoading] = useState(true);
@@ -276,9 +344,10 @@ export default function TenantGroupPage({ group }: { group: TenantGroup }) {
 
   useEffect(() => {
     const controller = new AbortController();
-    api<Tenant[]>(`tenants.php?category=${encodeURIComponent(group.category)}`, { signal: controller.signal })
-      .then((rows) => {
-        setTenants(sortTenants(rows));
+    api<unknown>(`tenants.php?category=${encodeURIComponent(group.category)}`, { signal: controller.signal })
+      .then((payload) => {
+        const rows = tenantRows(payload);
+        setTenants(sortTenants(rows.map(normalizeTenant)));
         setError("");
       })
       .catch((requestError) => {
@@ -397,7 +466,8 @@ export default function TenantGroupPage({ group }: { group: TenantGroup }) {
           stall_no: showStall ? form.stall_no : "",
         }),
       });
-      setTenants((rows) => sortTenants(editingId ? rows.map((row) => row.id === saved.id ? saved : row) : [...rows, saved]));
+      const normalizedSaved = normalizeTenant(saved);
+      setTenants((rows) => sortTenants(editingId ? rows.map((row) => row.id === normalizedSaved.id ? normalizedSaved : row) : [...rows, normalizedSaved]));
       setDialogMode(null);
     } catch (requestError) {
       setFormError(requestError instanceof Error ? requestError.message : "Could not save tenant");
@@ -545,18 +615,15 @@ export default function TenantGroupPage({ group }: { group: TenantGroup }) {
 
       <section className={`${card} overflow-hidden`} aria-label={`${group.label} records`}>
         <div className="hidden max-h-[650px] overflow-auto md:block">
-          <table className={`w-full ${showBrokerSize ? "min-w-[1100px]" : showStall ? "min-w-[1040px]" : "min-w-[940px]"} text-left text-sm`}>
+          <table className="w-full min-w-[900px] text-left text-sm">
             <thead className="sticky top-0 z-10 bg-slate-50 text-xs text-slate-600 shadow-[0_1px_0_#e2e8f0]">
               <tr>
                 <th className="px-4 py-3 font-semibold">Permit Number</th>
-                <th className="px-4 py-3 font-semibold">Business Name</th>
-                <th className="px-4 py-3 font-semibold">Owner Name</th>
-                {showBrokerSize && <th className="px-4 py-3 font-semibold">Broker Size</th>}
-                <th className="px-4 py-3 font-semibold">Contact Number</th>
-                {showStall && <th className="px-4 py-3 font-semibold">Stall No.</th>}
-                <th className="px-4 py-3 font-semibold">Address</th>
                 <th className="px-4 py-3 font-semibold">Application Status</th>
-                <th className="px-4 py-3 font-semibold">Status</th>
+                <th className="px-4 py-3 font-semibold">Last Name</th>
+                <th className="px-4 py-3 font-semibold">First Name</th>
+                <th className="px-4 py-3 font-semibold">Middle Name</th>
+                <th className="px-4 py-3 font-semibold">Business Name</th>
                 <th className="px-4 py-3 text-right font-semibold">Actions</th>
               </tr>
             </thead>
@@ -578,15 +645,16 @@ export default function TenantGroupPage({ group }: { group: TenantGroup }) {
               ) : (
                 pageRows.map((tenant, index) => (
                   <tr key={tenant.id} className="hover:bg-slate-50/80">
+                    {(() => {
+                      const owner = ownerNameParts(tenant);
+                      return (
+                        <>
                     <td className="whitespace-nowrap px-4 py-3 font-medium text-slate-800">{tenant.permit_number || "—"}</td>
-                    <td className="whitespace-nowrap px-4 py-3 font-semibold text-slate-900">{tenant.business_name}</td>
-                    <td className="whitespace-nowrap px-4 py-3 text-slate-700">{tenant.owner_name || "—"}</td>
-                    {showBrokerSize && <td className="px-4 py-3 capitalize text-slate-700">{tenant.broker_size || "—"}</td>}
-                    <td className="whitespace-nowrap px-4 py-3 text-slate-700">{tenant.contact_number || "—"}</td>
-                    {showStall && <td className="px-4 py-3 text-slate-700">{tenant.stall_no || "—"}</td>}
-                    <td className="max-w-44 px-4 py-3 text-slate-700"><span className="block truncate" title={tenant.address || undefined}>{tenant.address || "—"}</span></td>
                     <td className="px-4 py-3"><StatusBadge status={tenant.application_status} /></td>
-                    <td className="px-4 py-3"><StatusBadge status={tenant.status} /></td>
+                    <td className="whitespace-nowrap px-4 py-3 text-slate-700">{owner.lastName}</td>
+                    <td className="whitespace-nowrap px-4 py-3 text-slate-700">{owner.firstName}</td>
+                    <td className="whitespace-nowrap px-4 py-3 text-slate-700">{owner.middleName}</td>
+                    <td className="whitespace-nowrap px-4 py-3 font-semibold text-slate-900">{tenant.business_name}</td>
                     <td className="px-4 py-3 text-right">
                       <TenantActions
                         tenant={tenant}
@@ -598,6 +666,9 @@ export default function TenantGroupPage({ group }: { group: TenantGroup }) {
                         onDelete={() => requestDelete(tenant)}
                       />
                     </td>
+                        </>
+                      );
+                    })()}
                   </tr>
                 ))
               )}
@@ -649,17 +720,20 @@ export default function TenantGroupPage({ group }: { group: TenantGroup }) {
                   </div>
                   <div className="mt-3 flex flex-wrap gap-2">
                     <StatusBadge status={tenant.application_status} />
-                    <StatusBadge status={tenant.status} />
                   </div>
                   {isExpanded && (
                     <div id={`tenant-details-${tenant.id}`} className="animate-fade mt-4 border-t border-slate-100 pt-4">
                       <dl className="grid grid-cols-2 gap-x-4 gap-y-4">
-                        <Detail label="Owner" value={tenant.owner_name} />
-                        {showBrokerSize && <Detail label="Broker size" value={tenant.broker_size} />}
-                        <Detail label="Contact" value={tenant.contact_number} />
-                        {showStall && <Detail label="Stall No." value={tenant.stall_no} />}
-                        <div className="col-span-2"><Detail label="Address" value={tenant.address} /></div>
-                        {tenant.remarks && <div className="col-span-2"><Detail label="Remarks" value={tenant.remarks} /></div>}
+                        {(() => {
+                          const owner = ownerNameParts(tenant);
+                          return (
+                            <>
+                              <Detail label="Last name" value={owner.lastName} />
+                              <Detail label="First name" value={owner.firstName} />
+                              <Detail label="Middle name" value={owner.middleName} />
+                            </>
+                          );
+                        })()}
                       </dl>
                     </div>
                   )}

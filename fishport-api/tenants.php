@@ -8,7 +8,7 @@ const TENANT_CATEGORIES = [
   'carinderia_eatery',
 ];
 const TENANT_SIZES = ['small', 'big'];
-const TENANT_COLUMNS = 'id, category, permit_number, broker_size, business_name, owner_name, contact_number,
+const TENANT_COLUMNS = 'id, category, permit_number, broker_size, business_name, owner_name, last_name, first_name, middle_name, contact_number,
                         stall_no, address, application_status, status, remarks, created_at, updated_at';
 
 function tenant_schema(): void {
@@ -46,7 +46,40 @@ function tenant_schema(): void {
   if (!db()->query("SHOW COLUMNS FROM fp_tenants LIKE 'application_status'")->fetch()) {
     db()->exec("ALTER TABLE fp_tenants ADD application_status VARCHAR(20) NOT NULL DEFAULT 'pending' AFTER address");
   }
+
+  $columns = db()->query('SHOW COLUMNS FROM fp_tenants')->fetchAll(PDO::FETCH_COLUMN);
+  $columnSet = array_fill_keys($columns, true);
+  $legacyPermit = first_existing_column($columnSet, ['permit_no', 'permit', 'permit_id', 'permitnumber']);
+  if ($legacyPermit) {
+    db()->exec("UPDATE fp_tenants SET permit_number = NULLIF(TRIM(permit_number), '')");
+    db()->exec("UPDATE fp_tenants SET permit_number = NULLIF(TRIM(`$legacyPermit`), '') WHERE permit_number IS NULL");
+  }
+
+  $legacyApplication = first_existing_column($columnSet, ['application', 'application_state', 'permit_status', 'permit_application_status']);
+  if ($legacyApplication) {
+    db()->exec("UPDATE fp_tenants SET application_status = CASE
+      WHEN LOWER(TRIM(`$legacyApplication`)) IN ('approved', 'rejected', 'pending')
+      THEN LOWER(TRIM(`$legacyApplication`))
+      ELSE application_status
+    END");
+  }
   db()->exec("UPDATE fp_tenants SET category = 'retail_fish_seafood' WHERE category = 'retailer'");
+}
+
+function first_existing_column(array $columns, array $candidates): ?string {
+  foreach ($candidates as $candidate) {
+    if (isset($columns[$candidate])) return $candidate;
+  }
+  return null;
+}
+
+function tenant_output(array $tenant): array {
+  $permit = $tenant['permit_number'] ?? $tenant['permit_no'] ?? $tenant['permit'] ?? null;
+  $application = $tenant['application_status'] ?? $tenant['application'] ?? $tenant['permit_status'] ?? null;
+
+  $tenant['permit_number'] = $permit !== null ? trim((string)$permit) : null;
+  $tenant['application_status'] = $application !== null ? trim((string)$application) : null;
+  return $tenant;
 }
 
 function clean_tenant(array $body): array {
@@ -91,7 +124,8 @@ function clean_tenant(array $body): array {
 function find_tenant(int $id): ?array {
   $statement = db()->prepare('SELECT ' . TENANT_COLUMNS . ' FROM fp_tenants WHERE id = ?');
   $statement->execute([$id]);
-  return $statement->fetch() ?: null;
+  $tenant = $statement->fetch();
+  return $tenant ? tenant_output($tenant) : null;
 }
 
 tenant_schema();
@@ -119,7 +153,7 @@ if ($method === 'GET') {
   $sql .= ' ORDER BY business_name ASC';
   $statement = db()->prepare($sql);
   $statement->execute($params);
-  json_out($statement->fetchAll());
+  json_out(array_map('tenant_output', $statement->fetchAll()));
 }
 
 if ($method === 'POST') {
