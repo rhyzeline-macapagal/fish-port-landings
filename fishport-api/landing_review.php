@@ -9,7 +9,7 @@ $u = auth_user(['admin']);
 $b = body();
 
 $status = $b['status'] ?? '';
-if (!in_array($status, ['approved', 'rejected'], true)) {
+if ($status !== 'approved') {
   json_out(['error' => 'Invalid status'], 422);
 }
 
@@ -35,7 +35,7 @@ if (count($ids) > 1000) json_out(['error' => 'Too many landings in one request']
 $ph  = implode(',', array_fill(0, count($ids), '?'));
 $sql = "UPDATE fp_landings SET status = ?, reviewed_by = ?, reviewed_at = NOW() WHERE id IN ($ph)";
 // "Approve all" only touches rows that are still pending.
-// A single trip is always updated, so an approved trip can still be rejected.
+// A single trip is always updated, so every species row is approved together.
 if (count($ids) > 1 && !$byTrip) $sql .= " AND status = 'pending'";
 
 $st = db()->prepare($sql);

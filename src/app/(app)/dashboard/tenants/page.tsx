@@ -17,7 +17,7 @@ export default function TenantsPage() {
 
       <div className="grid items-start gap-4 xl:grid-cols-3">
         {TENANT_GROUP_SECTIONS.map((section) => (
-          <section key={section.id} className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+          <section key={section.id} className="surface-glass overflow-hidden rounded-xl border border-slate-200">
             <div className="flex items-center gap-3 border-b border-slate-200 bg-slate-50 px-4 py-3.5">
               <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-sky-100 text-[#0875d1]">
                 <Layers3 size={16} aria-hidden="true" />

@@ -3,7 +3,7 @@
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import {
-  Wallet, Clock, Plus, Fish, Ship, X, LoaderCircle, ChevronDown,
+  Wallet, Clock, Plus, Fish, Ship, X, LoaderCircle,
 } from "lucide-react";
 import { api, formatDate, formatKg, formatPeso, Landing } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
@@ -11,6 +11,7 @@ import { useEntryModal } from "@/context/EntryModalContext";
 import KpiCard from "@/components/KpiCard";
 import StatusBadge from "@/components/StatusBadge";
 import ExportMenu, { type ExportKind } from "@/components/ExportMenu";
+import AnimatedSelect from "@/components/AnimatedSelect";
 import type { Report } from "@/lib/export"; // type only: the export library itself loads on demand
 
 /* ------------------------------------------------------------------ */
@@ -25,7 +26,7 @@ import type { Report } from "@/lib/export"; // type only: the export library its
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const MONTHS_SHORT = MONTHS.map((m) => m.slice(0, 3));
 
-const card = "rounded-xl border border-slate-200 bg-white shadow-[0_2px_10px_rgba(18,52,77,0.05)]";
+const card = "surface-glass rounded-xl border border-slate-200";
 const num = (v: unknown) => Number(v ?? 0);
 const formatSummaryPeso = (value: unknown) => new Intl.NumberFormat("en-PH", {
   style: "currency",
@@ -86,84 +87,6 @@ const CardHeader = memo(function CardHeader({ title, subtitle, right }: { title:
     </div>
   );
 });
-
-function DashboardSelect({
-  label,
-  value,
-  options,
-  onChange,
-  className = "",
-}: {
-  label: string;
-  value: string;
-  options: { value: string; label: string }[];
-  onChange: (value: string) => void;
-  className?: string;
-}) {
-  const [open, setOpen] = useState(false);
-  const menuRef = useRef<HTMLDivElement>(null);
-  const selected = options.find((option) => option.value === value)?.label ?? value;
-
-  useEffect(() => {
-    if (!open) return;
-    const closeOnOutsideClick = (event: MouseEvent) => {
-      if (!menuRef.current?.contains(event.target as Node)) setOpen(false);
-    };
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setOpen(false);
-    };
-    document.addEventListener("mousedown", closeOnOutsideClick);
-    document.addEventListener("keydown", closeOnEscape);
-    return () => {
-      document.removeEventListener("mousedown", closeOnOutsideClick);
-      document.removeEventListener("keydown", closeOnEscape);
-    };
-  }, [open]);
-
-  function choose(nextValue: string) {
-    onChange(nextValue);
-    setOpen(false);
-  }
-
-  return (
-    <div ref={menuRef} className={`relative ${className}`}>
-      <button
-        type="button"
-        onClick={() => setOpen((current) => !current)}
-        aria-label={label}
-        aria-haspopup="menu"
-        aria-expanded={open}
-        className="inline-flex h-10 min-w-28 items-center justify-between gap-3 rounded-lg border border-slate-200 bg-white px-3.5 text-xs font-medium text-slate-700 shadow-sm transition-colors hover:bg-slate-50 focus:outline-none focus-visible:border-[#1a8cc7] focus-visible:ring-2 focus-visible:ring-[#1a8cc7]/15"
-      >
-        <span className="truncate">{selected}</span>
-        <ChevronDown size={14} aria-hidden="true" className={`shrink-0 transition-transform duration-200 ${open ? "rotate-180" : ""}`} />
-      </button>
-
-      {open && (
-        <div
-          role="menu"
-          aria-label={label}
-          className="absolute right-0 top-full z-30 mt-2 max-h-72 w-56 overflow-y-auto rounded-xl bg-white p-1.5 text-slate-700 shadow-xl ring-1 ring-slate-900/10"
-        >
-          {options.map((option) => (
-            <button
-              key={option.value}
-              type="button"
-              role="menuitem"
-              aria-current={option.value === value ? "true" : undefined}
-              onClick={() => choose(option.value)}
-              className="flex w-full items-center rounded-lg px-3 py-2.5 text-left text-sm transition-colors hover:bg-slate-50 focus:bg-slate-50 focus:outline-none"
-            >
-              <span className={option.value === value ? "font-semibold text-slate-900" : "font-medium text-slate-700"}>
-                {option.label}
-              </span>
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
 
 function Empty({ icon: Icon, title, text, height = "h-56" }: { icon: typeof Fish; title: string; text: string; height?: string }) {
   return (
@@ -522,18 +445,21 @@ export default function DashboardPage() {
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center xl:justify-end">
           <p className="whitespace-nowrap text-xs font-medium text-slate-500">{today}</p>
           <div className="flex flex-wrap items-center gap-2">
-            <DashboardSelect
+            <AnimatedSelect
               label="Reporting year"
               value={year}
               options={yearOptions.map((option) => ({ value: String(option), label: String(option) }))}
               onChange={setYear}
+              className="min-w-28"
+              align="right"
             />
-            <DashboardSelect
+            <AnimatedSelect
               label="Reporting month"
               value={month}
               options={monthOptions.map((option) => ({ value: option.v, label: option.l }))}
               onChange={setMonth}
               className="min-w-32"
+              align="right"
             />
             <ExportMenu onExport={exportDashboard} disabled={!data} title={`Download the ${periodLabel} dashboard`} />
             {canAdd && (

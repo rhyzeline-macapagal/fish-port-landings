@@ -110,7 +110,7 @@ const KpiCard = memo(function KpiCard({
 
   return (
     <article
-      className={`@container flex h-full min-h-32 min-w-0 flex-col rounded-xl border bg-white p-4 shadow-[0_2px_10px_rgba(18,52,77,0.05)] ${
+      className={`surface-glass @container flex h-full min-h-32 min-w-0 flex-col rounded-xl border p-4 ${
         highlight ? "border-amber-300" : "border-slate-200"
       }`}
     >

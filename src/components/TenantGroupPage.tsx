@@ -31,6 +31,7 @@ import { api } from "@/lib/api";
 import type { TenantCategory, TenantGroup } from "@/lib/tenant-groups";
 import { useAuth } from "@/context/AuthContext";
 import Modal from "@/components/Modal";
+import AnimatedSelect from "@/components/AnimatedSelect";
 import { ghostBtn, inputCls, primaryBtn } from "@/components/ui";
 
 type Size = "small" | "big";
@@ -77,7 +78,7 @@ type DialogMode = "add" | "view" | "edit";
 
 const PAGE_SIZE = 10;
 const BASE_APPLICATION_STATUSES = ["New", "Renew"];
-const card = "rounded-xl border border-slate-200 bg-white shadow-[0_2px_10px_rgba(18,52,77,0.05)]";
+const card = "surface-glass rounded-xl border border-slate-200";
 const disabledField = "disabled:cursor-default disabled:bg-slate-50 disabled:text-slate-600 disabled:opacity-100";
 
 const emptyForm: FormState = {
@@ -602,7 +603,7 @@ export default function TenantGroupPage({ group }: { group: TenantGroup }) {
         </div>
       </section>
 
-      <section className={`${card} p-4`} aria-label="Tenant filters">
+      <section className={`${card} relative z-30 overflow-visible p-4`} aria-label="Tenant filters">
         <div className="grid gap-3 md:grid-cols-[minmax(14rem,1fr)_11rem_10rem_auto] md:items-end">
           <label className="block">
             <span className="mb-1.5 block text-xs font-semibold text-slate-600">Search records</span>
@@ -618,33 +619,30 @@ export default function TenantGroupPage({ group }: { group: TenantGroup }) {
               />
             </span>
           </label>
-          <label className="block text-xs font-semibold text-slate-600">
-            Application status
-            <select
-              aria-label="Filter by application status"
+          <div className="block text-xs font-semibold text-slate-600">
+            <span>Application status</span>
+            <AnimatedSelect
+              label="Filter by application status"
               value={applicationFilter}
-              onChange={(event) => { setApplicationFilter(event.target.value); setPage(1); }}
-              className={`${inputCls} mt-1.5`}
-            >
-              <option value="">All applications</option>
-              {applicationOptions.map((value) => (
-                <option key={value} value={value}>{value}</option>
-              ))}
-            </select>
-          </label>
-          <label className="block text-xs font-semibold text-slate-600">
-            Operational status
-            <select
-              aria-label="Filter by operational status"
+              onChange={(value) => { setApplicationFilter(value); setPage(1); }}
+              options={[{ value: "", label: "All applications" }, ...applicationOptions.map((value) => ({ value, label: value }))]}
+              className="mt-1.5"
+            />
+          </div>
+          <div className="block text-xs font-semibold text-slate-600">
+            <span>Operational status</span>
+            <AnimatedSelect
+              label="Filter by operational status"
               value={statusFilter}
-              onChange={(event) => { setStatusFilter(event.target.value); setPage(1); }}
-              className={`${inputCls} mt-1.5`}
-            >
-              <option value="">All statuses</option>
-              <option value="active">Active</option>
-              <option value="inactive">Inactive</option>
-            </select>
-          </label>
+              onChange={(value) => { setStatusFilter(value); setPage(1); }}
+              options={[
+                { value: "", label: "All statuses" },
+                { value: "active", label: "Active" },
+                { value: "inactive", label: "Inactive" },
+              ]}
+              className="mt-1.5"
+            />
+          </div>
           <button
             type="button"
             onClick={clearFilters}
@@ -669,7 +667,7 @@ export default function TenantGroupPage({ group }: { group: TenantGroup }) {
         </div>
       )}
 
-      <section className={`${card} overflow-hidden`} aria-label={`${group.label} records`}>
+      <section className={`${card} relative z-0 overflow-hidden`} aria-label={`${group.label} records`}>
         <div className="hidden max-h-[650px] overflow-auto md:block">
           <table className="w-full min-w-[900px] text-left text-sm">
             <thead className="sticky top-0 z-10 bg-slate-50 text-xs text-slate-600 shadow-[0_1px_0_#e2e8f0]">

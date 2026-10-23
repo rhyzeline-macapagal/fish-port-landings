@@ -26,15 +26,13 @@ $ids = array_values(array_unique(array_filter(array_map('intval', $ids), fn($i) 
 if (!$ids) json_out(['error' => 'No landings selected'], 422);
 if (count($ids) > 1000) json_out(['error' => 'Too many landings in one request'], 422);
 
-// Safety: only rows that are already rejected can be deleted.
-// Pending and approved rows are never touched, even if their id is sent.
 $ph = implode(',', array_fill(0, count($ids), '?'));
-$st = db()->prepare("DELETE FROM fp_landings WHERE id IN ($ph) AND status = 'rejected'");
+$st = db()->prepare("DELETE FROM fp_landings WHERE id IN ($ph)");
 $st->execute($ids);
 
 $deleted = $st->rowCount();
 if ($deleted === 0) {
-  json_out(['error' => 'Only rejected landings can be deleted'], 422);
+  json_out(['error' => 'Landing record was not found'], 404);
 }
 
 json_out(['deleted' => $deleted]);

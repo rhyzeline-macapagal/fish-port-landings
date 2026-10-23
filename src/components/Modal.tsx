@@ -53,9 +53,9 @@ export default function Modal({
         role="dialog"
         aria-modal="true"
         aria-label={title}
-        className={`animate-pop relative flex max-h-[94vh] w-full ${maxWidthClassName} flex-col overflow-hidden rounded-t-2xl border border-slate-200 bg-white shadow-[0_24px_80px_-12px_rgba(8,30,50,0.45)] outline-none sm:rounded-2xl`}
+        className={`animate-pop relative flex max-h-[94vh] w-full ${maxWidthClassName} flex-col overflow-hidden rounded-t-2xl border border-white/80 bg-white/92 shadow-[0_24px_80px_-12px_rgba(8,30,50,0.45)] backdrop-blur-xl outline-none sm:rounded-2xl`}
       >
-        <div className="flex items-center justify-between gap-4 border-b border-slate-200 bg-white px-5 py-4 sm:px-6">
+        <div className="flex items-center justify-between gap-4 border-b border-sky-100/80 bg-[linear-gradient(105deg,rgba(255,255,255,0.88),rgba(235,247,255,0.78))] px-5 py-4 backdrop-blur-xl sm:px-6">
           <div className="flex items-center gap-3.5">
             {icon && (
               <div className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-sky-50 text-[#0875d1]">

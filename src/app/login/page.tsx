@@ -56,13 +56,13 @@ export default function LoginPage() {
         <div className="absolute bottom-40 right-16 h-40 w-40 rounded-full bg-white/5" />
 
         <div className="relative flex items-center gap-3">
-          <div className="grid h-14 w-14 place-items-center rounded-2xl bg-white p-2 shadow-lg">
+          <div className="relative h-14 w-14 shrink-0 overflow-hidden rounded-2xl ring-1 ring-white/25 shadow-lg">
             <Image
               src="/fishport_1.jpg"
-              alt="FishPort logo"
-              width={44}
-              height={44}
-              className="h-full w-full object-contain"
+              alt="Mercedes FishPort"
+              fill
+              sizes="56px"
+              className="object-cover"
               priority
             />
           </div>
@@ -84,18 +84,13 @@ export default function LoginPage() {
       </div>
 
       {/* Form panel */}
-      <div className="flex items-center justify-center bg-white p-6 sm:p-12">
-        <div className="animate-pop w-full max-w-sm">
+      <div className="flex items-center justify-center bg-[radial-gradient(circle_at_top_right,rgba(14,165,233,0.13),transparent_35%),linear-gradient(145deg,rgba(255,255,255,0.96),rgba(238,247,253,0.9))] p-6 sm:p-12">
+        <div className="glass animate-pop w-full max-w-sm rounded-3xl p-6 sm:p-8 lg:border-0 lg:bg-transparent lg:p-0 lg:shadow-none lg:backdrop-blur-none">
           {/* Logo (visible on mobile, too) */}
           <div className="mb-8 flex items-center gap-3 lg:hidden">
-            <Image
-              src="/fishport_1.jpg"
-              alt="FishPort logo"
-              width={44}
-              height={44}
-              className="h-11 w-11 object-contain"
-              priority
-            />
+            <span className="relative h-11 w-11 shrink-0 overflow-hidden rounded-xl shadow-sm ring-1 ring-slate-200">
+              <Image src="/fishport_1.jpg" alt="Mercedes FishPort" fill sizes="44px" className="object-cover" priority />
+            </span>
             <div className="leading-tight">
               <p className="font-bold">FishPort</p>
               <p className="text-sm text-slate-500">Statistics</p>

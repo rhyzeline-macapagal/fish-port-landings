@@ -36,7 +36,7 @@ export default function TenantNavigation({
   }, [search]);
 
   return (
-    <div id={id} className={mobile ? "flex min-h-0 flex-1 flex-col" : undefined}>
+    <div id={id}>
       <div className="relative mx-2 mb-3">
         <Search
           aria-hidden="true"
@@ -55,19 +55,16 @@ export default function TenantNavigation({
           }}
           aria-label="Search tenant groups"
           placeholder="Search tenant groups..."
-          className="h-9 w-full rounded-lg border border-white/15 bg-[#0e2b40] pl-9 pr-3 text-xs text-white outline-none transition-colors duration-150 placeholder:text-slate-500 hover:border-white/25 focus:border-sky-400 focus:ring-2 focus:ring-sky-400/20 motion-reduce:transition-none"
+          className="h-10 w-full rounded-xl border border-white/15 bg-slate-950/20 pl-9 pr-3 text-[13px] text-white shadow-inner outline-none transition-colors duration-150 placeholder:text-slate-400 hover:border-white/25 focus:border-sky-400 focus:bg-slate-950/30 focus:ring-2 focus:ring-sky-400/20 motion-reduce:transition-none"
         />
       </div>
 
-      <div
-        className={`${mobile ? "min-h-0 flex-1" : "max-h-[23rem]"} overflow-y-auto overscroll-contain px-2 pb-2`}
-        aria-live="polite"
-      >
+      <div className="px-2 pb-2" aria-live="polite">
         {sections.length === 0 ? (
           <div className="mx-1 rounded-lg border border-dashed border-white/15 px-3 py-6 text-center">
             <Store aria-hidden="true" size={18} className="mx-auto text-slate-500" />
-            <p className="mt-2 text-xs font-medium text-slate-300">No tenant groups found</p>
-            <p className="mt-1 text-[10px] leading-relaxed text-slate-500">Try a category name such as fish, vessel, or ice.</p>
+            <p className="mt-2 text-[13px] font-medium text-slate-200">No tenant groups found</p>
+            <p className="mt-1 text-[11px] leading-relaxed text-slate-400">Try a category name such as fish, vessel, or ice.</p>
           </div>
         ) : (
           <div className="space-y-4">
@@ -75,7 +72,7 @@ export default function TenantNavigation({
               <section key={section.id} aria-labelledby={`${id}-${section.id}`}>
                 <h3
                   id={`${id}-${section.id}`}
-                  className="mb-1.5 px-2 text-[9px] font-semibold uppercase tracking-[0.14em] text-slate-500"
+                  className="mb-1.5 px-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-sky-100/45"
                 >
                   {section.label}
                 </h3>
@@ -91,15 +88,15 @@ export default function TenantNavigation({
                         aria-label={group.label}
                         aria-current={active ? "page" : undefined}
                         title={group.label}
-                        className={`group flex items-start gap-2 rounded-md px-2.5 py-2 text-[11px] leading-snug outline-none transition-colors duration-150 motion-reduce:transition-none ${
+                        className={`group flex items-start gap-2.5 rounded-lg px-2.5 py-2.5 text-[13px] font-medium leading-snug outline-none transition-colors duration-150 motion-reduce:transition-none ${
                           active
-                            ? "bg-sky-500/20 font-semibold text-sky-100 ring-1 ring-inset ring-sky-400/20"
-                            : "text-slate-300 hover:bg-white/8 hover:text-white focus-visible:bg-white/10 focus-visible:ring-2 focus-visible:ring-sky-300"
+                            ? "bg-sky-400/20 font-semibold text-white ring-1 ring-inset ring-sky-300/25"
+                            : "text-slate-200 hover:bg-white/10 hover:text-white focus-visible:bg-white/10 focus-visible:ring-2 focus-visible:ring-sky-300"
                         }`}
                       >
                         <span
                           aria-hidden="true"
-                          className={`mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full ${active ? "bg-sky-300" : "bg-slate-600 group-hover:bg-slate-400"}`}
+                          className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${active ? "bg-sky-300 shadow-[0_0_8px_rgba(125,211,252,0.8)]" : "bg-slate-500 group-hover:bg-slate-300"}`}
                         />
                         <span>{mobile ? group.label : group.navLabel}</span>
                       </Link>

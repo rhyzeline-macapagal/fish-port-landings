@@ -12,12 +12,13 @@ import { useAuth } from "@/context/AuthContext";
 import { useEntryModal } from "@/context/EntryModalContext";
 import StatusBadge from "@/components/StatusBadge";
 import KpiCard from "@/components/KpiCard";
+import AnimatedSelect from "@/components/AnimatedSelect";
 import { ghostBtn, inputCls, primaryBtn } from "@/components/ui";
 import type { Col, ExportCell, Report } from "@/lib/export";
-import { type ExportKind } from "@/components/ExportMenu";
+import ExportMenu, { type ExportKind } from "@/components/ExportMenu";
 
 /* Same simple look as the dashboard: solid colours, thin borders, no blur layers, no gradients. */
-const card = "rounded-xl border border-slate-200 bg-white shadow-sm";
+const card = "surface-glass rounded-xl border border-slate-200";
 const EditLandingModal = dynamic(() => import("@/components/EditLandingModal"));
 
 const THIS_YEAR = String(new Date().getFullYear());
@@ -63,7 +64,6 @@ const TABS = [
   { label: "All", value: "", dot: "" },
   { label: "Pending", value: "pending", dot: "bg-amber-500" },
   { label: "Approved", value: "approved", dot: "bg-emerald-500" },
-  { label: "Rejected", value: "rejected", dot: "bg-red-500" },
 ];
 
 const PERIODS = [
@@ -382,13 +382,13 @@ function Delivery({ truck }: { truck: boolean }) {
 
 function ReviewActions({
   status,
-  onReview,
+  onApprove,
   onEdit,
   onDelete,
   labelled,
 }: {
   status: Landing["status"];
-  onReview?: (s: "approved" | "rejected") => void;
+  onApprove?: () => void;
   onEdit?: () => void;
   onDelete?: () => void;
   labelled?: boolean;
@@ -410,9 +410,9 @@ function ReviewActions({
           {labelled && "Edit"}
         </button>
       )}
-      {onReview && status !== "approved" && (
+      {onApprove && status !== "approved" && (
         <button
-          onClick={() => onReview("approved")}
+          onClick={onApprove}
           title="Approve"
           aria-label="Approve landing"
           className={`${base} bg-emerald-50 text-emerald-700 hover:bg-emerald-100`}
@@ -421,19 +421,7 @@ function ReviewActions({
           {labelled && "Approve"}
         </button>
       )}
-      {onReview && status !== "rejected" && (
-        <button
-          onClick={() => onReview("rejected")}
-          title="Reject"
-          aria-label="Reject landing"
-          className={`${base} bg-red-50 text-red-700 hover:bg-red-100`}
-        >
-          <X size={16} />
-          {labelled && "Reject"}
-        </button>
-      )}
-      {/* Delete is only offered for rejected landings */}
-      {onDelete && status === "rejected" && (
+      {onDelete && (
         <button
           type="button"
           onClick={onDelete}
@@ -626,7 +614,7 @@ function filtersFromUrl(): Filters {
   const year = p.get("year");
   return {
     ...EMPTY,
-    status: ["pending", "approved", "rejected"].includes(status) ? status : "",
+    status: ["pending", "approved"].includes(status) ? status : "",
     year: year !== null && /^\d{4}$/.test(year) ? year : EMPTY.year,
   };
 }
@@ -675,7 +663,7 @@ export default function LandingsPage() {
   const [tableSort, setTableSort] = useState<TableSort>(null);
   const [editing, setEditing] = useState<Landing | null>(null);
 
-  // Delete (rejected landings only, admin only)
+  // Delete (admin only)
   const [deleting, setDeleting] = useState<Landing | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
 
@@ -836,9 +824,10 @@ export default function LandingsPage() {
     };
   }
 
-  async function runExport(kind: ExportKind) {
+  async function runExport(kind: ExportKind, scopeOverride?: ExportScope) {
+    const scope = scopeOverride ?? exScope;
     setExError("");
-    if (exScope === "range") {
+    if (scope === "range") {
       if (!exFrom || !exTo) return setExError("Choose both dates.");
       if (exFrom > exTo) return setExError("The 'From' date must be before 'To'.");
     }
@@ -852,7 +841,7 @@ export default function LandingsPage() {
       let subtitle: string;
       let skipRejected = true;
 
-      if (exScope === "shown") {
+      if (scope === "shown") {
         list = sortedRows;
         label = month !== "0" ? `${MONTHS[Number(month) - 1]} ${applied.year}` : applied.year || "All years";
         slug = `current-view_${applied.year || "all-years"}${month !== "0" ? "_" + pad(Number(month)) : ""}`;
@@ -860,11 +849,11 @@ export default function LandingsPage() {
         skipRejected = applied.status === "";
       } else {
         const params: Record<string, string> = { sort: "landing_date", dir: "asc" };
-        if (exScope === "year") {
+        if (scope === "year") {
           params.year = exYear;
           label = exYear;
           slug = exYear;
-        } else if (exScope === "range") {
+        } else if (scope === "range") {
           params.from = exFrom;
           params.to = exTo;
           label = `${exFrom} to ${exTo}`;
@@ -1068,11 +1057,11 @@ export default function LandingsPage() {
     return () => window.removeEventListener("keydown", onKey);
   }, [gxOpen, gxBusy]);
 
-  async function review(r: Landing, status: "approved" | "rejected") {
+  async function approve(r: Landing) {
     try {
       await api("landing_review.php", {
         method: "POST",
-        body: JSON.stringify(r.trip_id ? { trip_id: r.trip_id, status } : { id: r.id, status }),
+        body: JSON.stringify(r.trip_id ? { trip_id: r.trip_id, status: "approved" } : { id: r.id, status: "approved" }),
       });
       load();
     } catch (e) {
@@ -1080,8 +1069,8 @@ export default function LandingsPage() {
     }
   }
 
-  // Permanently deletes a rejected landing. A multi-species trip is deleted as a whole,
-  // the same way approve / reject already work on the whole trip.
+  // Permanently deletes a landing. A multi-species trip is deleted as a whole,
+  // the same way approval already works on the whole trip.
   async function confirmDelete() {
     if (!deleting) return;
     setDeleteBusy(true);
@@ -1288,22 +1277,29 @@ export default function LandingsPage() {
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          <select
-            aria-label="Year"
+          <AnimatedSelect
+            label="Year"
             value={filters.year}
-            onChange={(e) => changeYear(e.target.value)}
-            className={`${inputCls} !w-auto min-w-28`}
-          >
-            <option value="">All years</option>
-            {yearOptions.map((y) => (
-              <option key={y} value={String(y)}>{y}</option>
-            ))}
-          </select>
+            onChange={changeYear}
+            options={[
+              { value: "", label: "All years" },
+              ...yearOptions.map((year) => ({ value: String(year), label: String(year) })),
+            ]}
+            className="min-w-28"
+            align="right"
+          />
 
-          <select aria-label="Month" value={month} onChange={(e) => selectMonth(e.target.value)} className={`${inputCls} !w-auto min-w-32`}>
-            <option value="0">All months</option>
-            {MONTHS.map((name, index) => <option key={name} value={String(index + 1)}>{name}</option>)}
-          </select>
+          <AnimatedSelect
+            label="Month"
+            value={month}
+            onChange={selectMonth}
+            options={[
+              { value: "0", label: "All months" },
+              ...MONTHS.map((name, index) => ({ value: String(index + 1), label: name })),
+            ]}
+            className="min-w-32"
+            align="right"
+          />
 
           <button
             type="button"
@@ -1314,19 +1310,16 @@ export default function LandingsPage() {
             Show all
           </button>
 
-          <button
-            type="button"
-            onClick={() => {
+          <ExportMenu
+            disabled={loading}
+            title="Export landings"
+            onExport={(kind) => runExport(kind, "shown")}
+            onMoreOptions={() => {
               setExError("");
               setExYear(filters.year || THIS_YEAR);
               setExportOpen(true);
             }}
-            disabled={loading}
-            className={ghostBtn}
-            title="Export landings to Excel or PDF"
-          >
-            <Download size={16} /> Export <ChevronDown size={14} />
-          </button>
+          />
 
           <button
             onClick={openNewEntry}
@@ -1753,7 +1746,7 @@ export default function LandingsPage() {
                 onSearch={(search) => updateCardFilters({ search })}
               />
               <select aria-label="Status filter" className={inputCls} value={cardFilters.status} onChange={(e) => updateCardFilters({ status: e.target.value })}>
-                <option value="">All statuses</option><option value="pending">Pending</option><option value="approved">Approved</option><option value="rejected">Rejected</option>
+                <option value="">All statuses</option><option value="pending">Pending</option><option value="approved">Approved</option>
               </select>
               <select aria-label="Species filter" className={inputCls} value={cardFilters.species} onChange={(e) => updateCardFilters({ species: e.target.value })}>
                 <option value="">All species</option>{selectOptions(options.species)}
@@ -1807,7 +1800,7 @@ export default function LandingsPage() {
                         <div><p className="text-xs text-slate-500">Registered owner</p><p className="break-words font-medium">{val(r.boat_owner)}</p></div>
                         <div><p className="text-xs text-slate-500">Fishing gear</p><p className="break-words font-medium">{val(r.fishing_gear)}</p></div>
                       </div>}
-                      {canEdit && <ReviewActions status={r.status} onEdit={() => setEditing(r)} onReview={isAdmin ? (status) => review(r, status) : undefined} onDelete={isAdmin ? () => setDeleting(r) : undefined} labelled />}
+                      {canEdit && <ReviewActions status={r.status} onEdit={() => setEditing(r)} onApprove={isAdmin ? () => approve(r) : undefined} onDelete={isAdmin ? () => setDeleting(r) : undefined} labelled />}
                     </li>
                     );
                   })}
@@ -1848,7 +1841,7 @@ export default function LandingsPage() {
                               <ReviewActions
                                 status={r.status}
                                 onEdit={() => setEditing(r)}
-                                onReview={isAdmin ? (status) => review(r, status) : undefined}
+                                onApprove={isAdmin ? () => approve(r) : undefined}
                                 onDelete={isAdmin ? () => setDeleting(r) : undefined}
                               />
                             </td>
@@ -2164,7 +2157,7 @@ export default function LandingsPage() {
               </div>
               <div className="min-w-0">
                 <h2 id="delete-title" className="text-lg font-semibold text-slate-900">
-                  Delete this rejected landing?
+                  Delete this landing?
                 </h2>
                 <p className="mt-1 text-sm text-slate-600">
                   {Number(deleting.trip_items) > 1
