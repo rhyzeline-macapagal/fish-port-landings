@@ -7,9 +7,12 @@ const TENANT_CATEGORIES = [
   'commercial_vessel_below_3t', 'marine_products', 'marine_fishing_supply',
   'carinderia_eatery',
 ];
+const TENANT_API_VERSION = '2026-10-23-tenant-fix-v1';
 const TENANT_SIZES = ['small', 'big'];
 const TENANT_COLUMNS = 'id, category, permit_number, broker_size, business_name, owner_name, last_name, first_name, middle_name, contact_number,
                         stall_no, address, application_status, status, remarks, created_at, updated_at';
+
+header('X-Tenants-Api-Version: ' . TENANT_API_VERSION);
 
 function tenant_schema(): void {
   db()->exec(
@@ -153,7 +156,16 @@ if ($method === 'GET') {
   $sql .= ' ORDER BY business_name ASC';
   $statement = db()->prepare($sql);
   $statement->execute($params);
-  json_out(array_map('tenant_output', $statement->fetchAll()));
+  $rows = array_map('tenant_output', $statement->fetchAll());
+  if (($_GET['debug'] ?? '') === '1') {
+    json_out([
+      'api_version' => TENANT_API_VERSION,
+      'count' => count($rows),
+      'sample' => $rows[0] ?? null,
+      'rows' => $rows,
+    ]);
+  }
+  json_out($rows);
 }
 
 if ($method === 'POST') {
