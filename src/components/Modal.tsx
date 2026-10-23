@@ -1,6 +1,6 @@
 "use client";
 
-import { ReactNode, useEffect } from "react";
+import { ReactNode, useEffect, useRef } from "react";
 import { X } from "lucide-react";
 
 export default function Modal({
@@ -9,35 +9,49 @@ export default function Modal({
   icon,
   onClose,
   children,
+  maxWidthClassName = "max-w-5xl",
+  closeDisabled = false,
 }: {
   title: string;
   subtitle?: string;
   icon?: ReactNode;
   onClose: () => void;
   children: ReactNode;
+  maxWidthClassName?: string;
+  closeDisabled?: boolean;
 }) {
+  const panel = useRef<HTMLDivElement>(null);
+
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    document.addEventListener("keydown", onKey);
     const prev = document.body.style.overflow;
     document.body.style.overflow = "hidden";
+    panel.current?.focus();
     return () => {
-      document.removeEventListener("keydown", onKey);
       document.body.style.overflow = prev;
     };
-  }, [onClose]);
+  }, []);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && !closeDisabled) onClose();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [closeDisabled, onClose]);
 
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center sm:p-6">
-      <div className="animate-fade absolute inset-0 bg-[#0b2233]/55" onClick={onClose} />
+      <div className="animate-fade absolute inset-0 bg-[#0b2233]/55" onClick={() => !closeDisabled && onClose()} />
 
       <div
+        ref={panel}
+        tabIndex={-1}
         role="dialog"
         aria-modal="true"
         aria-label={title}
-        className="animate-pop relative flex max-h-[94vh] w-full max-w-5xl flex-col overflow-hidden rounded-t-2xl border border-slate-200 bg-white shadow-[0_24px_80px_-12px_rgba(8,30,50,0.45)] sm:rounded-2xl"
+        className={`animate-pop relative flex max-h-[94vh] w-full ${maxWidthClassName} flex-col overflow-hidden rounded-t-2xl border border-slate-200 bg-white shadow-[0_24px_80px_-12px_rgba(8,30,50,0.45)] outline-none sm:rounded-2xl`}
       >
         <div className="flex items-center justify-between gap-4 border-b border-slate-200 bg-white px-5 py-4 sm:px-6">
           <div className="flex items-center gap-3.5">
@@ -52,9 +66,11 @@ export default function Modal({
             </div>
           </div>
           <button
+            type="button"
             onClick={onClose}
+            disabled={closeDisabled}
             aria-label="Close"
-            className="grid h-9 w-9 place-items-center rounded-lg text-slate-500 transition hover:bg-slate-100 hover:text-slate-900"
+            className="grid h-9 w-9 place-items-center rounded-lg text-slate-500 transition hover:bg-slate-100 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-50"
           >
             <X size={17} />
           </button>

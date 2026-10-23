@@ -10,5 +10,5 @@ export default async function Page({ params }: { params: Promise<{ group: string
   const { group: slug } = await params;
   const group = tenantGroupBySlug(slug);
   if (!group) notFound();
-  return <TenantGroupPage group={group} />;
+  return <TenantGroupPage key={group.category} group={group} />;
 }
