@@ -23,11 +23,13 @@ export default function Modal({
   const panel = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const prev = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     panel.current?.focus();
     return () => {
       document.body.style.overflow = prev;
+      previousFocus?.focus();
     };
   }, []);
 

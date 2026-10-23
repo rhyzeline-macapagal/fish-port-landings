@@ -2,6 +2,8 @@ import { notFound } from "next/navigation";
 import TenantGroupPage from "@/components/TenantGroupPage";
 import { TENANT_GROUPS, tenantGroupBySlug } from "@/lib/tenant-groups";
 
+export const instant = false;
+
 export function generateStaticParams() {
   return TENANT_GROUPS.map(({ slug }) => ({ group: slug }));
 }

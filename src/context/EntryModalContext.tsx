@@ -1,7 +1,17 @@
 "use client";
 
-import { createContext, ReactNode, useCallback, useContext, useState } from "react";
-import NewLandingModal from "@/components/NewLandingModal";
+import dynamic from "next/dynamic";
+import { createContext, ReactNode, useCallback, useContext, useMemo, useState } from "react";
+
+const NewLandingModal = dynamic(() => import("@/components/NewLandingModal"), {
+  loading: () => (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-[#0b2233]/55 p-4" role="status" aria-live="polite">
+      <div className="rounded-xl border border-slate-200 bg-white px-5 py-4 text-sm font-medium text-slate-700 shadow-xl">
+        Loading landing form…
+      </div>
+    </div>
+  ),
+});
 
 interface Ctx {
   openNewEntry: () => void;
@@ -19,9 +29,10 @@ export function EntryModalProvider({ children }: { children: ReactNode }) {
     setOpen(false);
     setVersion((v) => v + 1);
   }, []);
+  const value = useMemo(() => ({ openNewEntry, version }), [openNewEntry, version]);
 
   return (
-    <C.Provider value={{ openNewEntry, version }}>
+    <C.Provider value={value}>
       {children}
       {open && <NewLandingModal onClose={close} onSaved={saved} />}
     </C.Provider>

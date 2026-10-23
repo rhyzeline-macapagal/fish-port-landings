@@ -91,10 +91,6 @@ const TOP_GROUPS: { key: string; label: string; filter: keyof Filters }[] = [
   { key: "vessel", label: "Producer", filter: "vessel" },
   { key: "species", label: "Species", filter: "species" },
   { key: "origin", label: "Origin", filter: "origin" },
-  { key: "plate", label: "Plate number", filter: "plate" },
-  { key: "delivery", label: "Land vs sea", filter: "delivery" },
-  { key: "ground", label: "Fishing ground", filter: "ground" },
-  { key: "gear", label: "Fishing gear", filter: "gear" },
   { key: "broker", label: "Broker", filter: "broker" },
 ];
 
@@ -1280,7 +1276,7 @@ export default function LandingsPage() {
   const selectOptions = (list: string[]) => list.map((s) => <option key={s}>{s}</option>);
 
   return (
-    <div className="space-y-5">
+    <div className="flex flex-col gap-5">
       <section className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[#0875d1]">Landing operations</p>
@@ -1404,7 +1400,7 @@ export default function LandingsPage() {
       </section>
 
       {/* Top performers: ranked within the current filters */}
-      <section className={`${card} overflow-hidden`}>
+      <section className={`${card} order-last overflow-hidden`}>
         <div className="flex flex-wrap items-center justify-between gap-3 p-4">
           <div className="flex items-center gap-3">
             <div className="grid h-9 w-9 place-items-center rounded-lg bg-amber-50 text-amber-600">

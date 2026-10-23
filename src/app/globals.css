@@ -46,7 +46,7 @@ body {
   to { opacity: 1; transform: none; }
 }
 .animate-fade { animation: fade-in 0.2s ease-out; }
-.animate-pop { animation: pop-in 0.28s cubic-bezier(0.16, 1, 0.3, 1); }
+.animate-pop { animation: pop-in 0.18s cubic-bezier(0.16, 1, 0.3, 1); }
 
 @media (prefers-reduced-motion: reduce) {
   .animate-fade, .animate-pop { animation: none; }

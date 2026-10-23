@@ -80,9 +80,9 @@ function ParkingModal({ title, subtitle, onClose, children, wide = false }: {
   }, [onClose]);
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center sm:p-6">
-      <div className="absolute inset-0 bg-[#0b2233]/55" onMouseDown={onClose} />
+      <div className="animate-fade absolute inset-0 bg-[#0b2233]/55" onMouseDown={onClose} />
       <div ref={panel} tabIndex={-1} role="dialog" aria-modal="true" aria-label={title}
-        className={`${card} relative flex max-h-[94vh] w-full flex-col overflow-hidden rounded-b-none outline-none sm:rounded-xl ${wide ? "max-w-3xl" : "max-w-xl"}`}>
+        className={`${card} animate-pop relative flex max-h-[94vh] w-full flex-col overflow-hidden rounded-b-none outline-none sm:rounded-xl ${wide ? "max-w-3xl" : "max-w-xl"}`}>
         <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-5 py-4 sm:px-6">
           <div><h2 className="text-lg font-semibold text-[#14263d]">{title}</h2>{subtitle && <p className="mt-0.5 text-sm text-slate-500">{subtitle}</p>}</div>
           <button type="button" onClick={onClose} aria-label="Close" className="grid h-9 w-9 place-items-center rounded-lg text-slate-500 hover:bg-slate-100"><X size={18} /></button>

@@ -1,6 +1,6 @@
 "use client";
 
-import { Menu } from "lucide-react";
+import { LogOut, Menu } from "lucide-react";
 import { usePathname } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
 import { tenantGroupBySlug } from "@/lib/tenant-groups";
@@ -19,7 +19,7 @@ function getPageLabel(pathname: string) {
 
 export default function AppHeader({ onMenuOpen }: { onMenuOpen: () => void }) {
   const pathname = usePathname();
-  const { user } = useAuth();
+  const { user, logout } = useAuth();
   if (!user) return null;
 
   const pageLabel = getPageLabel(pathname);
@@ -58,6 +58,15 @@ export default function AppHeader({ onMenuOpen }: { onMenuOpen: () => void }) {
             <span className="block max-w-40 truncate text-xs font-semibold text-[#14263d]">{user.full_name}</span>
             <span className="mt-0.5 block text-[10px] capitalize text-slate-500">{user.role}</span>
           </span>
+          <button
+            type="button"
+            onClick={logout}
+            aria-label="Sign out"
+            title="Sign out"
+            className="grid h-9 w-9 shrink-0 place-items-center rounded-lg text-slate-500 transition-colors hover:bg-slate-100 hover:text-[#12344d] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1a8cc7]/40"
+          >
+            <LogOut size={17} />
+          </button>
         </div>
       </div>
     </header>

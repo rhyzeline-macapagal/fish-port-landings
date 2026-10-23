@@ -11,7 +11,6 @@ import {
   CircleParking,
   ClipboardList,
   LayoutDashboard,
-  LogOut,
   Menu,
   Plus,
   Store,
@@ -59,7 +58,7 @@ type SidebarProps = {
 };
 
 export default function Sidebar({ mobileOpen, onMobileClose, onMobileOpen }: SidebarProps) {
-  const { user, logout } = useAuth();
+  const { user } = useAuth();
   const { openNewEntry } = useEntryModal();
   const pathname = usePathname();
   const [tenantsOpen, setTenantsOpen] = useState(pathname.startsWith("/dashboard/tenants"));
@@ -78,6 +77,15 @@ export default function Sidebar({ mobileOpen, onMobileClose, onMobileOpen }: Sid
     document.addEventListener("keydown", handleEscape);
     return () => document.removeEventListener("keydown", handleEscape);
   }, [mobileOpen, onMobileClose, showMobileTenants]);
+
+  useEffect(() => {
+    if (!mobileOpen) return;
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = previous;
+    };
+  }, [mobileOpen]);
 
   if (!user) return null;
 
@@ -229,15 +237,6 @@ export default function Sidebar({ mobileOpen, onMobileClose, onMobileOpen }: Sid
               <span className="block truncate text-xs font-semibold text-white">{userFullName}</span>
               <span className="mt-1 block text-[10px] capitalize text-slate-400">{userRole}</span>
             </span>
-            <button
-              type="button"
-              onClick={logout}
-              aria-label="Sign out"
-              title="Sign out"
-              className="grid h-9 w-9 place-items-center rounded-lg text-slate-400 transition-colors hover:bg-white/10 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-300"
-            >
-              <LogOut size={16} />
-            </button>
           </div>
         </div>
       </div>
@@ -259,11 +258,11 @@ export default function Sidebar({ mobileOpen, onMobileClose, onMobileOpen }: Sid
           type="button"
           aria-label="Close navigation"
           onClick={onMobileClose}
-          className={`absolute inset-0 bg-slate-950/45 transition-opacity ${mobileOpen ? "opacity-100" : "opacity-0"}`}
+          className={`absolute inset-0 bg-slate-950/45 transition-opacity duration-200 motion-reduce:transition-none ${mobileOpen ? "opacity-100" : "opacity-0"}`}
         />
         <aside
           aria-label="Navigation drawer"
-          className={`absolute inset-y-0 left-0 w-[min(21rem,88vw)] shadow-2xl transition-transform duration-200 ${mobileOpen ? "translate-x-0" : "-translate-x-full"}`}
+          className={`absolute inset-y-0 left-0 w-[min(21rem,88vw)] shadow-2xl transition-transform duration-200 motion-reduce:transition-none ${mobileOpen ? "translate-x-0" : "-translate-x-full"}`}
         >
           {renderSidebarPanel(true)}
         </aside>

@@ -11,6 +11,7 @@ import { useEntryModal } from "@/context/EntryModalContext";
 import KpiCard from "@/components/KpiCard";
 import StatusBadge from "@/components/StatusBadge";
 import ExportMenu, { type ExportKind } from "@/components/ExportMenu";
+import { ghostBtn } from "@/components/ui";
 import type { Report } from "@/lib/export"; // type only: the export library itself loads on demand
 
 /* ------------------------------------------------------------------ */
@@ -292,6 +293,10 @@ export default function DashboardPage() {
   const periodLabel = m ? `${MONTHS[m - 1]} ${year}` : year;
   const yearOptions = years.length ? years : [Number(year)];
   const loading = !data && !error;
+  const latestLandingDate = (data?.recent ?? []).reduce((latest, record) => (
+    !latest || record.landing_date > latest ? record.landing_date : latest
+  ), "");
+  const latestDateNote = latestLandingDate ? `As of ${formatDate(latestLandingDate)}` : "No landing date yet";
 
   // Derived data (memoized so month/year toggles don't recompute everything)
   const species = useMemo<SpeciesRow[]>(
@@ -444,7 +449,7 @@ export default function DashboardPage() {
               aria-label="Reporting year"
               value={year}
               onChange={(event) => setYear(event.target.value)}
-              className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-xs font-medium text-[#14263d] shadow-sm outline-none focus:border-[#1a8cc7] focus:ring-2 focus:ring-[#1a8cc7]/15"
+              className={`${ghostBtn} h-10 !px-3 !py-2 text-xs`}
             >
               {yearOptions.map((option) => <option key={option} value={option}>{option}</option>)}
             </select>
@@ -452,7 +457,7 @@ export default function DashboardPage() {
               aria-label="Reporting month"
               value={month}
               onChange={(event) => setMonth(event.target.value)}
-              className="h-10 min-w-32 rounded-lg border border-slate-200 bg-white px-3 text-xs font-medium text-[#14263d] shadow-sm outline-none focus:border-[#1a8cc7] focus:ring-2 focus:ring-[#1a8cc7]/15"
+              className={`${ghostBtn} h-10 min-w-32 !px-3 !py-2 text-xs`}
             >
               {monthOptions.map((option) => <option key={option.v} value={option.v}>{option.l}</option>)}
             </select>
@@ -478,7 +483,7 @@ export default function DashboardPage() {
           value={cur.landings.toLocaleString()}
           icon={Ship}
           tone="blue"
-          hint={`Recorded in ${periodLabel}`}
+          hint={latestDateNote}
           loading={loading}
           current={cur.landings}
           previous={prev?.landings}
@@ -491,7 +496,7 @@ export default function DashboardPage() {
           compactValue={formatCompactPeso(data?.total_value)}
           icon={Wallet}
           tone="green"
-          hint={`Across all ${periodLabel} landings`}
+          hint={latestDateNote}
           loading={loading}
           current={cur.value}
           previous={prev?.value}

@@ -18,11 +18,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem("user");
-      if (raw && localStorage.getItem("token")) setUser(JSON.parse(raw));
-    } catch {}
-    setLoading(false);
+    let active = true;
+    queueMicrotask(() => {
+      if (!active) return;
+      try {
+        const raw = localStorage.getItem("user");
+        if (raw && localStorage.getItem("token")) setUser(JSON.parse(raw));
+      } catch {}
+      setLoading(false);
+    });
+    return () => {
+      active = false;
+    };
   }, []);
 
   function saveSession(res: { token: string; user: User }) {
