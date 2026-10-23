@@ -20,25 +20,29 @@ function parking_date($value): ?string {
   return $date && $date->format('Y-m-d') === $value ? $value : null;
 }
 
-function parking_filters(array $input): array {
+function parking_filters(array $input, array $skip = []): array {
+  // $skip lists filters to leave out: 'date', 'from', 'to', 'year', 'month', 'q'.
+  $use = function (string $key) use ($input, $skip): bool {
+    return !in_array($key, $skip, true) && !empty($input[$key]);
+  };
   $where = ['1 = 1'];
   $params = [];
 
-  if (!empty($input['date']) && ($date = parking_date($input['date']))) {
+  if ($use('date') && ($date = parking_date($input['date']))) {
     $where[] = 'p.collection_date = ?';
     $params[] = $date;
   } else {
-    if (!empty($input['from']) && ($date = parking_date($input['from']))) {
+    if ($use('from') && ($date = parking_date($input['from']))) {
       $where[] = 'p.collection_date >= ?';
       $params[] = $date;
     }
-    if (!empty($input['to']) && ($date = parking_date($input['to']))) {
+    if ($use('to') && ($date = parking_date($input['to']))) {
       $where[] = 'p.collection_date <= ?';
       $params[] = $date;
     }
 
-    $year = (int)($input['year'] ?? 0);
-    $month = (int)($input['month'] ?? 0);
+    $year = in_array('year', $skip, true) ? 0 : (int)($input['year'] ?? 0);
+    $month = in_array('month', $skip, true) ? 0 : (int)($input['month'] ?? 0);
     if ($year >= 2000 && $year <= 2100) {
       if ($month >= 1 && $month <= 12) {
         $start = sprintf('%04d-%02d-01', $year, $month);
@@ -49,16 +53,32 @@ function parking_filters(array $input): array {
         $where[] = 'p.collection_date BETWEEN ? AND ?';
         array_push($params, "$year-01-01", "$year-12-31");
       }
+    } elseif ($month >= 1 && $month <= 12) {
+      // A month chosen with "All years" matches that month in every year.
+      $where[] = 'MONTH(p.collection_date) = ?';
+      $params[] = $month;
     }
   }
 
-  $query = trim((string)($input['q'] ?? ''));
+  $query = in_array('q', $skip, true) ? '' : trim((string)($input['q'] ?? ''));
   if ($query !== '') {
     $where[] = 'COALESCE(p.remarks, \'\') LIKE ?';
     $params[] = '%' . addcslashes($query, '%_\\') . '%';
   }
 
   return [implode(' AND ', $where), $params];
+}
+
+// Total collected in one calendar month, optionally narrowed by an already-built WHERE clause.
+function parking_month_total(string $where, array $params, int $year, int $month): float {
+  $start = sprintf('%04d-%02d-01', $year, $month);
+  $end = (new DateTimeImmutable($start))->modify('last day of this month')->format('Y-m-d');
+  $statement = db()->prepare(
+    "SELECT COALESCE(SUM(p.total_collection), 0) FROM fp_parking_collections p
+     WHERE $where AND p.collection_date BETWEEN ? AND ?"
+  );
+  $statement->execute(array_merge($params, [$start, $end]));
+  return (float)$statement->fetchColumn();
 }
 
 function parking_select_columns(): string {
@@ -119,14 +139,33 @@ if ($method === 'GET') {
   $today = (new DateTimeImmutable('today', new DateTimeZone('Asia/Manila')))->format('Y-m-d');
   $thisMonth = substr($today, 0, 7);
   $thisYear = (int)substr($today, 0, 4);
+  // Reporting period for the month and year cards: the chosen year/month, else the year/month of a
+  // date filter, else the current month. They follow the remarks search but always cover whole months.
+  $year = (int)($_GET['year'] ?? 0);
+  $anchor = parking_date($_GET['date'] ?? '') ?? parking_date($_GET['to'] ?? '') ?? parking_date($_GET['from'] ?? '');
+  if ($year < 2000 || $year > 2100) $year = $anchor ? (int)substr($anchor, 0, 4) : $thisYear;
+  $compareMonth = (int)($_GET['month'] ?? 0);
+  if ($compareMonth < 1 || $compareMonth > 12) {
+    if ($anchor && (int)substr($anchor, 0, 4) === $year) $compareMonth = (int)substr($anchor, 5, 2);
+    else $compareMonth = $year === $thisYear ? (int)substr($today, 5, 2) : 12;
+  }
+  [$cmpWhere, $cmpParams] = parking_filters($_GET, ['year', 'month', 'date', 'from', 'to']);
+
   $cards = db()->query(
     "SELECT
       COALESCE(SUM(CASE WHEN collection_date = '$today' THEN total_collection ELSE 0 END), 0) AS today_collection,
-      0 AS today_vehicles,
-      COALESCE(SUM(CASE WHEN DATE_FORMAT(collection_date, '%Y-%m') = '$thisMonth' THEN total_collection ELSE 0 END), 0) AS month_collection,
-      COALESCE(SUM(CASE WHEN YEAR(collection_date) = $thisYear THEN total_collection ELSE 0 END), 0) AS year_collection
+      0 AS today_vehicles
      FROM fp_parking_collections"
   )->fetch();
+  $cards['month_collection'] = parking_month_total($cmpWhere, $cmpParams, $year, $compareMonth);
+  $yearStatement = db()->prepare(
+    "SELECT COALESCE(SUM(p.total_collection), 0) FROM fp_parking_collections p
+     WHERE $cmpWhere AND p.collection_date BETWEEN ? AND ?"
+  );
+  $yearStatement->execute(array_merge($cmpParams, ["$year-01-01", "$year-12-31"]));
+  $cards['year_collection'] = (float)$yearStatement->fetchColumn();
+  $cards['month'] = $compareMonth;
+  $cards['year'] = $year;
 
   $summaryStatement = db()->prepare(
     "SELECT COUNT(*) AS entries, 0 AS vehicles,
@@ -158,14 +197,16 @@ if ($method === 'GET') {
     }
   }
 
-  $year = (int)($_GET['year'] ?? $thisYear);
-  if ($year < 2000 || $year > 2100) $year = $thisYear;
+  // Monthly totals follow every filter except the month filter, so all 12 months stay visible
+  // (the selected month is highlighted on the page).
+  [$monthWhere, $monthParams] = parking_filters($_GET, ['year', 'month']);
   $monthlyStatement = db()->prepare(
-    "SELECT MONTH(collection_date) AS month, SUM(total_collection) AS collection
-     FROM fp_parking_collections
-     WHERE collection_date BETWEEN ? AND ? GROUP BY MONTH(collection_date)"
+    "SELECT MONTH(p.collection_date) AS month, SUM(p.total_collection) AS collection
+     FROM fp_parking_collections p
+     WHERE $monthWhere AND p.collection_date BETWEEN ? AND ?
+     GROUP BY MONTH(p.collection_date)"
   );
-  $monthlyStatement->execute(["$year-01-01", "$year-12-31"]);
+  $monthlyStatement->execute(array_merge($monthParams, ["$year-01-01", "$year-12-31"]));
   $monthMap = [];
   foreach ($monthlyStatement->fetchAll() as $row) $monthMap[(int)$row['month']] = $row;
   $monthly = [];
@@ -177,21 +218,11 @@ if ($method === 'GET') {
     ];
   }
 
-  $compareMonth = (int)($_GET['month'] ?? 0);
-  if ($compareMonth < 1 || $compareMonth > 12) {
-    $compareMonth = $year === $thisYear ? (int)substr($today, 5, 2) : 12;
-  }
-  $currentAmount = (float)$monthly[$compareMonth - 1]['collection'];
-  if ($compareMonth > 1) {
-    $previousAmount = (float)$monthly[$compareMonth - 2]['collection'];
-  } else {
-    $previousYear = $year - 1;
-    $previousStatement = db()->prepare(
-      'SELECT COALESCE(SUM(total_collection), 0) FROM fp_parking_collections WHERE collection_date BETWEEN ? AND ?'
-    );
-    $previousStatement->execute(["$previousYear-12-01", "$previousYear-12-31"]);
-    $previousAmount = (float)$previousStatement->fetchColumn();
-  }
+  // Month comparison reuses the reporting month above.
+  $currentAmount = (float)$cards['month_collection'];
+  $previousAmount = $compareMonth > 1
+    ? parking_month_total($cmpWhere, $cmpParams, $year, $compareMonth - 1)
+    : parking_month_total($cmpWhere, $cmpParams, $year - 1, 12);
   $difference = $currentAmount - $previousAmount;
   $comparison = [
     'month' => $compareMonth,

@@ -26,7 +26,7 @@ type DayRow = { date: string; collection: number | string };
 type Comparison = { month: number; current: number | string; previous: number | string; difference: number | string; percent: number | null };
 type ParkingData = {
   records: ParkingRecord[]; total: number; page: number; limit: number;
-  cards: { today_collection: number | string; month_collection: number | string; year_collection: number | string };
+  cards: { today_collection: number | string; month_collection: number | string; year_collection: number | string; month: number; year: number };
   summary: {
     entries: number | string; collection: number | string; active_days: number | string;
     average_daily: number | string; highest_day: DayRow | null; lowest_day: DayRow | null;
@@ -178,6 +178,15 @@ export default function ParkingPage() {
   const maxDay = Math.max(...recentDays.map((row) => num(row.collection)), 0);
   const activeFilters = Object.entries(filters).filter(([, value]) => value) as Array<[keyof Filters, string]>;
   const advancedCount = [filters.date, filters.from, filters.to].filter(Boolean).length;
+  const selectedMonth = Number(filters.month) || 0;
+  const periodFiltered = Boolean(filters.date || filters.from || filters.to || filters.q);
+  const totalLabel = periodFiltered ? "Filtered total" : "Annual total";
+  const now = new Date();
+  const cardMonth = data?.cards.month ?? now.getMonth() + 1;
+  const cardYear = data?.cards.year ?? now.getFullYear();
+  const isCurrentYear = cardYear === now.getFullYear();
+  const isCurrentMonth = isCurrentYear && cardMonth === now.getMonth() + 1;
+  const remarksNote = filters.q ? " | matching remarks" : "";
 
   function setFilter<K extends keyof Filters>(key: K, value: Filters[K]) {
     setLoading(true); setError(""); setPage(1); setFilters((current) => ({ ...current, [key]: value }));
@@ -245,7 +254,7 @@ export default function ParkingPage() {
           name: `${full.year} monthly summary`,
           columns: [{ header: "Month" }, { header: "Total collection", format: "money" }],
           rows: full.monthly.map((row) => [MONTHS[row.month - 1], row.collection]),
-          totals: ["Annual total", full.monthly.reduce((sum, row) => sum + num(row.collection), 0)],
+          totals: [periodFiltered ? "Filtered total" : "Annual total", full.monthly.reduce((sum, row) => sum + num(row.collection), 0)],
         },
       ],
     };
@@ -269,8 +278,8 @@ export default function ParkingPage() {
       <section className="grid grid-cols-2 gap-3 sm:gap-4 xl:grid-cols-4">
         <KpiCard label="Today's Collection" value={formatPeso(data?.cards.today_collection)} compactValue={compactPeso(data?.cards.today_collection)} icon={Wallet} tone="green" hint="Collected today" loading={loading && !data} />
         <KpiCard label="Collection Entries" value={num(data?.summary.entries).toLocaleString()} icon={ReceiptText} tone="blue" hint="Matching the current filters" loading={loading && !data} />
-        <KpiCard label="This Month's Collection" value={formatPeso(data?.cards.month_collection)} compactValue={compactPeso(data?.cards.month_collection)} icon={CalendarDays} tone="violet" hint="Current calendar month" loading={loading && !data} />
-        <KpiCard label="This Year's Collection" value={formatPeso(data?.cards.year_collection)} compactValue={compactPeso(data?.cards.year_collection)} icon={BarChart3} tone="yellow" hint="Current calendar year" loading={loading && !data} />
+        <KpiCard label={isCurrentMonth ? "This Month's Collection" : `${MONTHS[cardMonth - 1]} ${cardYear} Collection`} value={formatPeso(data?.cards.month_collection)} compactValue={compactPeso(data?.cards.month_collection)} icon={CalendarDays} tone="violet" hint={`${isCurrentMonth ? "Current calendar month" : "Selected month"}${remarksNote}`} loading={loading && !data} />
+        <KpiCard label={isCurrentYear ? "This Year's Collection" : `${cardYear} Collection`} value={formatPeso(data?.cards.year_collection)} compactValue={compactPeso(data?.cards.year_collection)} icon={BarChart3} tone="yellow" hint={`${isCurrentYear ? "Current calendar year" : "Selected year"}${remarksNote}`} loading={loading && !data} />
       </section>
 
       <section className={`${card} overflow-hidden`}>
@@ -313,11 +322,11 @@ export default function ParkingPage() {
         <article className={`${card} p-4`}><div className="flex items-center gap-3"><span className={`grid h-9 w-9 place-items-center rounded-full ${num(data?.comparison.difference) >= 0 ? "bg-emerald-50 text-emerald-600" : "bg-red-50 text-red-600"}`}>{num(data?.comparison.difference) >= 0 ? <TrendingUp size={17} /> : <TrendingDown size={17} />}</span><div><p className="text-xs font-medium text-slate-500">Previous month comparison</p><p className={`mt-0.5 text-lg font-semibold ${num(data?.comparison.difference) >= 0 ? "text-emerald-700" : "text-red-700"}`}>{num(data?.comparison.difference) >= 0 ? "+" : ""}{formatPeso(data?.comparison.difference)}</p></div></div><p className="mt-2 text-xs text-slate-500">{data?.comparison ? `${MONTHS[data.comparison.month - 1]} vs previous month${data.comparison.percent == null ? "" : ` (${data.comparison.percent > 0 ? "+" : ""}${data.comparison.percent}%)`}` : "No data"}</p></article>
       </section>
 
-      <section className={`${card} p-5`}><h2 className="font-semibold text-slate-900">Twelve-month collection trend</h2><p className="mb-5 text-sm text-slate-500">Monthly totals for {data?.year ?? "the selected year"}</p><div className="flex h-52 items-end gap-2" role="img" aria-label={`Monthly parking collection totals for ${data?.year ?? "the selected year"}`}>{(data?.monthly ?? []).map((row) => { const amount = num(row.collection); return <div key={row.month} className="flex min-w-0 flex-1 flex-col items-center gap-2" title={`${MONTHS[row.month - 1]}: ${formatPeso(amount)}`}><span className="hidden text-[10px] tabular-nums text-slate-500 2xl:block">{amount ? compact(amount) : ""}</span><div className="w-full rounded-t bg-[#0875d1]" style={{ height: `${maxMonth ? Math.max(2, amount / maxMonth * 150) : 2}px` }} /><span className="text-[10px] text-slate-500">{MONTHS[row.month - 1].slice(0, 3)}</span></div>; })}</div></section>
+      <section className={`${card} p-5`}><h2 className="font-semibold text-slate-900">Twelve-month collection trend</h2><p className="mb-5 text-sm text-slate-500">Monthly totals for {data?.year ?? "the selected year"}{periodFiltered ? " (matching your date and remarks filters)" : ""}</p><div className="flex h-52 items-end gap-2" role="img" aria-label={`Monthly parking collection totals for ${data?.year ?? "the selected year"}`}>{(data?.monthly ?? []).map((row) => { const amount = num(row.collection); return <div key={row.month} className="flex min-w-0 flex-1 flex-col items-center gap-2" title={`${MONTHS[row.month - 1]}: ${formatPeso(amount)}`}><span className="hidden text-[10px] tabular-nums text-slate-500 2xl:block">{amount ? compact(amount) : ""}</span><div className={`w-full rounded-t bg-[#0875d1] ${selectedMonth && selectedMonth !== row.month ? "opacity-35" : ""}`} style={{ height: `${maxMonth ? Math.max(2, amount / maxMonth * 150) : 2}px` }} /><span className="text-[10px] text-slate-500">{MONTHS[row.month - 1].slice(0, 3)}</span></div>; })}</div></section>
 
       <section className={`${card} p-5`}><h2 className="font-semibold text-slate-900">Latest 31 active days</h2><p className="mb-5 text-sm text-slate-500">Daily collection trend within the current filters</p>{recentDays.length ? <div className="overflow-x-auto"><div className="flex h-44 min-w-[620px] items-end gap-1" role="img" aria-label="Parking collection totals for the latest 31 active days">{recentDays.map((row) => { const amount = num(row.collection); return <div key={row.date} className="flex min-w-0 flex-1 flex-col items-center justify-end" title={`${formatDate(row.date)}: ${formatPeso(amount)}`}><div className="w-full rounded-t bg-emerald-500" style={{ height: `${maxDay ? Math.max(3, amount / maxDay * 125) : 3}px` }} /><span className="mt-2 hidden text-[9px] text-slate-500 sm:block">{row.date.slice(8)}</span></div>; })}</div></div> : <p className="py-8 text-center text-sm text-slate-500">No daily collection data for these filters.</p>}</section>
 
-      <section className={`${card} overflow-hidden`}><div className="border-b border-slate-200 px-5 py-4"><h2 className="font-semibold text-slate-900">Monthly collection summary</h2><p className="text-sm text-slate-500">Saved records for {data?.year}</p></div><div className="overflow-x-auto"><table className="w-full text-sm"><thead className="bg-slate-50 text-left text-slate-600"><tr><th className="px-5 py-3">Month</th><th className="px-5 py-3 text-right">Total collection</th></tr></thead><tbody className="divide-y divide-slate-100">{(data?.monthly ?? []).map((row) => <tr key={row.month}><td className="px-5 py-3">{MONTHS[row.month - 1]}</td><td className="px-5 py-3 text-right font-medium tabular-nums">{formatPeso(row.collection)}</td></tr>)}<tr className="bg-slate-50 font-semibold"><td className="px-5 py-3">Annual total</td><td className="px-5 py-3 text-right">{formatPeso(annualCollection)}</td></tr></tbody></table></div></section>
+      <section className={`${card} overflow-hidden`}><div className="border-b border-slate-200 px-5 py-4"><h2 className="font-semibold text-slate-900">Monthly collection summary</h2><p className="text-sm text-slate-500">Saved records for {data?.year}{periodFiltered ? " matching the current filters" : ""}</p></div><div className="overflow-x-auto"><table className="w-full text-sm"><thead className="bg-slate-50 text-left text-slate-600"><tr><th className="px-5 py-3">Month</th><th className="px-5 py-3 text-right">Total collection</th></tr></thead><tbody className="divide-y divide-slate-100">{(data?.monthly ?? []).map((row) => <tr key={row.month} className={selectedMonth === row.month ? "bg-sky-50 font-semibold" : ""}><td className="px-5 py-3">{MONTHS[row.month - 1]}</td><td className="px-5 py-3 text-right font-medium tabular-nums">{formatPeso(row.collection)}</td></tr>)}<tr className="bg-slate-50 font-semibold"><td className="px-5 py-3">{totalLabel}</td><td className="px-5 py-3 text-right">{formatPeso(annualCollection)}</td></tr></tbody></table></div></section>
 
       {formOpen && <ParkingModal title={viewOnly ? "Parking collection details" : editingId ? "Edit parking collection" : "Add parking collection"} subtitle={viewOnly ? "Review the saved collection details." : "Enter the collection date, total and any remarks."} onClose={() => !saving && setFormOpen(false)}>
         <form onSubmit={saveRecord} noValidate><div className="grid gap-4 bg-slate-50/50 p-5 sm:p-6">
