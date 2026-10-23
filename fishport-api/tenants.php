@@ -7,7 +7,7 @@ const TENANT_CATEGORIES = [
   'commercial_vessel_below_3t', 'marine_products', 'marine_fishing_supply',
   'carinderia_eatery',
 ];
-const TENANT_API_VERSION = '2026-10-23-tenant-fix-v1';
+const TENANT_API_VERSION = '2026-10-23-tenant-fix-v2';
 const TENANT_SIZES = ['small', 'big'];
 const TENANT_COLUMNS = 'id, category, permit_number, broker_size, business_name, owner_name, last_name, first_name, middle_name, contact_number,
                         stall_no, address, application_status, status, remarks, created_at, updated_at';
@@ -23,10 +23,13 @@ function tenant_schema(): void {
       broker_size VARCHAR(10) NULL,
       business_name VARCHAR(180) NOT NULL,
       owner_name VARCHAR(180) NULL,
+      last_name VARCHAR(100) NULL,
+      first_name VARCHAR(100) NULL,
+      middle_name VARCHAR(100) NULL,
       contact_number VARCHAR(80) NULL,
       stall_no VARCHAR(80) NULL,
       address VARCHAR(255) NULL,
-      application_status VARCHAR(20) NOT NULL DEFAULT 'pending',
+      application_status VARCHAR(50) NOT NULL DEFAULT 'New',
       status VARCHAR(20) NOT NULL DEFAULT 'active',
       remarks TEXT NULL,
       created_by INT UNSIGNED NOT NULL,
@@ -37,19 +40,36 @@ function tenant_schema(): void {
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
   );
 
-  // Older installations used a three-value ENUM. Expand it without losing records.
+  // Older installations used an ENUM for category. Widen it first, before any category UPDATE.
   $column = db()->query("SHOW COLUMNS FROM fp_tenants LIKE 'category'")->fetch();
   $type = strtolower((string)($column['Type'] ?? ''));
   if (!preg_match('/^varchar\((\d+)\)/', $type, $match) || (int)$match[1] < 64) {
     db()->exec('ALTER TABLE fp_tenants MODIFY category VARCHAR(64) NOT NULL');
   }
+
   if (!db()->query("SHOW COLUMNS FROM fp_tenants LIKE 'permit_number'")->fetch()) {
     db()->exec('ALTER TABLE fp_tenants ADD permit_number VARCHAR(100) NULL AFTER category');
   }
   if (!db()->query("SHOW COLUMNS FROM fp_tenants LIKE 'application_status'")->fetch()) {
-    db()->exec("ALTER TABLE fp_tenants ADD application_status VARCHAR(20) NOT NULL DEFAULT 'pending' AFTER address");
+    db()->exec("ALTER TABLE fp_tenants ADD application_status VARCHAR(50) NOT NULL DEFAULT 'New' AFTER address");
   }
 
+  // Make sure the name columns exist.
+  $nameColumns = ['last_name' => 'owner_name', 'first_name' => 'last_name', 'middle_name' => 'first_name'];
+  foreach ($nameColumns as $name => $after) {
+    if (!db()->query("SHOW COLUMNS FROM fp_tenants LIKE '$name'")->fetch()) {
+      db()->exec("ALTER TABLE fp_tenants ADD $name VARCHAR(100) NULL AFTER $after");
+    }
+  }
+
+  // Make sure application_status can hold values like "Renew".
+  $statusColumn = db()->query("SHOW COLUMNS FROM fp_tenants LIKE 'application_status'")->fetch();
+  $statusType = strtolower((string)($statusColumn['Type'] ?? ''));
+  if (!preg_match('/^varchar\((\d+)\)/', $statusType, $statusMatch) || (int)$statusMatch[1] < 50) {
+    db()->exec("ALTER TABLE fp_tenants MODIFY application_status VARCHAR(50) NOT NULL DEFAULT 'New'");
+  }
+
+  // Copy values from legacy column names, if any exist.
   $columns = db()->query('SHOW COLUMNS FROM fp_tenants')->fetchAll(PDO::FETCH_COLUMN);
   $columnSet = array_fill_keys($columns, true);
   $legacyPermit = first_existing_column($columnSet, ['permit_no', 'permit', 'permit_id', 'permitnumber']);
@@ -60,13 +80,23 @@ function tenant_schema(): void {
 
   $legacyApplication = first_existing_column($columnSet, ['application', 'application_state', 'permit_status', 'permit_application_status']);
   if ($legacyApplication) {
-    db()->exec("UPDATE fp_tenants SET application_status = CASE
-      WHEN LOWER(TRIM(`$legacyApplication`)) IN ('approved', 'rejected', 'pending')
-      THEN LOWER(TRIM(`$legacyApplication`))
-      ELSE application_status
-    END");
+    // Only fill rows that have no real status yet.
+    db()->exec("UPDATE fp_tenants
+      SET application_status = TRIM(`$legacyApplication`)
+      WHERE TRIM(COALESCE(`$legacyApplication`, '')) <> ''
+        AND (application_status IS NULL OR application_status = '' OR LOWER(application_status) = 'pending')");
   }
-  db()->exec("UPDATE fp_tenants SET category = 'retail_fish_seafood' WHERE category = 'retailer'");
+
+  // Rename old category names to the current ones (safe to repeat; does nothing once migrated).
+  // fish_processor is not mapped here because it must be split into drying or smoking by hand.
+  db()->exec("UPDATE fp_tenants SET category = CASE category
+      WHEN 'retailer'        THEN 'retail_fish_seafood'
+      WHEN 'vessel_below_3t' THEN 'commercial_vessel_below_3t'
+      WHEN 'vessel_above_3t' THEN 'commercial_vessel_above_3t'
+      WHEN 'fishing_supply'  THEN 'marine_fishing_supply'
+      WHEN 'eatery'          THEN 'carinderia_eatery'
+      ELSE category END
+    WHERE category IN ('retailer', 'vessel_below_3t', 'vessel_above_3t', 'fishing_supply', 'eatery')");
 }
 
 function first_existing_column(array $columns, array $candidates): ?string {
@@ -108,17 +138,32 @@ function clean_tenant(array $body): array {
     return $value === '' ? null : $value;
   };
 
+  $lastName = $optional('last_name');
+  $firstName = $optional('first_name');
+  $middleName = $optional('middle_name');
+
+  // Keep owner_name in sync with the name parts when they are provided.
+  $owner = $optional('owner_name');
+  $composed = trim(implode(' ', array_filter([$firstName, $middleName, $lastName])));
+  if ($composed !== '') $owner = $composed;
+
+  // Any application status is accepted (New, Renew, pending, approved, ...).
+  $application = $optional('application_status');
+  $application = $application !== null ? mb_substr($application, 0, 50) : 'New';
+
   return [
     'category' => $category,
     'permit_number' => $optional('permit_number'),
     'broker_size' => $size,
     'business_name' => $name,
-    'owner_name' => $optional('owner_name'),
+    'owner_name' => $owner,
+    'last_name' => $lastName,
+    'first_name' => $firstName,
+    'middle_name' => $middleName,
     'contact_number' => $optional('contact_number'),
     'stall_no' => $optional('stall_no'),
     'address' => $optional('address'),
-    'application_status' => in_array(($body['application_status'] ?? ''), ['pending', 'approved', 'rejected'], true)
-      ? $body['application_status'] : 'pending',
+    'application_status' => $application,
     'status' => ($body['status'] ?? 'active') === 'inactive' ? 'inactive' : 'active',
     'remarks' => $optional('remarks'),
   ];
@@ -147,9 +192,10 @@ if ($method === 'GET') {
   }
   $query = trim((string)($_GET['q'] ?? ''));
   if ($query !== '') {
-    $where[] = '(permit_number LIKE ? OR business_name LIKE ? OR owner_name LIKE ? OR contact_number LIKE ? OR stall_no LIKE ? OR address LIKE ?)';
+    $where[] = '(permit_number LIKE ? OR business_name LIKE ? OR owner_name LIKE ? OR last_name LIKE ? OR first_name LIKE ?
+                 OR middle_name LIKE ? OR contact_number LIKE ? OR stall_no LIKE ? OR address LIKE ?)';
     $term = '%' . addcslashes($query, '%_\\') . '%';
-    array_push($params, $term, $term, $term, $term, $term, $term);
+    array_push($params, ...array_fill(0, 9, $term));
   }
   $sql = 'SELECT ' . TENANT_COLUMNS . ' FROM fp_tenants';
   if ($where) $sql .= ' WHERE ' . implode(' AND ', $where);
@@ -160,6 +206,8 @@ if ($method === 'GET') {
   if (($_GET['debug'] ?? '') === '1') {
     json_out([
       'api_version' => TENANT_API_VERSION,
+      'database' => db()->query('SELECT DATABASE()')->fetchColumn(),
+      'total_rows' => (int)db()->query('SELECT COUNT(*) FROM fp_tenants')->fetchColumn(),
       'count' => count($rows),
       'sample' => $rows[0] ?? null,
       'rows' => $rows,
@@ -173,12 +221,13 @@ if ($method === 'POST') {
   $data = clean_tenant(body());
   db()->prepare(
     'INSERT INTO fp_tenants
-      (category, permit_number, broker_size, business_name, owner_name, contact_number,
-       stall_no, address, application_status, status, remarks, created_by)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+      (category, permit_number, broker_size, business_name, owner_name, last_name, first_name, middle_name,
+       contact_number, stall_no, address, application_status, status, remarks, created_by)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
   )->execute([
     $data['category'], $data['permit_number'], $data['broker_size'], $data['business_name'],
-    $data['owner_name'], $data['contact_number'], $data['stall_no'], $data['address'],
+    $data['owner_name'], $data['last_name'], $data['first_name'], $data['middle_name'],
+    $data['contact_number'], $data['stall_no'], $data['address'],
     $data['application_status'], $data['status'], $data['remarks'], $user['id'],
   ]);
   json_out(find_tenant((int)db()->lastInsertId()), 201);
@@ -190,10 +239,12 @@ if ($method === 'PUT') {
   $data = clean_tenant(body());
   db()->prepare(
     'UPDATE fp_tenants SET category = ?, permit_number = ?, broker_size = ?, business_name = ?, owner_name = ?,
-      contact_number = ?, stall_no = ?, address = ?, application_status = ?, status = ?, remarks = ? WHERE id = ?'
+      last_name = ?, first_name = ?, middle_name = ?, contact_number = ?, stall_no = ?, address = ?,
+      application_status = ?, status = ?, remarks = ? WHERE id = ?'
   )->execute([
     $data['category'], $data['permit_number'], $data['broker_size'], $data['business_name'],
-    $data['owner_name'], $data['contact_number'], $data['stall_no'], $data['address'],
+    $data['owner_name'], $data['last_name'], $data['first_name'], $data['middle_name'],
+    $data['contact_number'], $data['stall_no'], $data['address'],
     $data['application_status'], $data['status'], $data['remarks'], $id,
   ]);
   json_out(find_tenant($id));

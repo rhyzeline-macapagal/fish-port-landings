@@ -31,7 +31,6 @@ import { api } from "@/lib/api";
 import type { TenantCategory, TenantGroup } from "@/lib/tenant-groups";
 import { useAuth } from "@/context/AuthContext";
 import Modal from "@/components/Modal";
-import StatusBadge from "@/components/StatusBadge";
 import { ghostBtn, inputCls, primaryBtn } from "@/components/ui";
 
 type Size = "small" | "big";
@@ -63,6 +62,9 @@ type FormState = {
   broker_size: Size;
   business_name: string;
   owner_name: string;
+  last_name: string;
+  first_name: string;
+  middle_name: string;
   contact_number: string;
   stall_no: string;
   address: string;
@@ -74,6 +76,7 @@ type FormState = {
 type DialogMode = "add" | "view" | "edit";
 
 const PAGE_SIZE = 10;
+const BASE_APPLICATION_STATUSES = ["New", "Renew"];
 const card = "rounded-xl border border-slate-200 bg-white shadow-[0_2px_10px_rgba(18,52,77,0.05)]";
 const disabledField = "disabled:cursor-default disabled:bg-slate-50 disabled:text-slate-600 disabled:opacity-100";
 
@@ -82,10 +85,13 @@ const emptyForm: FormState = {
   broker_size: "small",
   business_name: "",
   owner_name: "",
+  last_name: "",
+  first_name: "",
+  middle_name: "",
   contact_number: "",
   stall_no: "",
   address: "",
-  application_status: "pending",
+  application_status: "New",
   status: "active",
   remarks: "",
 };
@@ -109,7 +115,7 @@ function normalizeTenant(raw: Tenant): Tenant {
     value,
   ]));
   const values = { ...source, ...normalizedKeys };
-  const applicationStatus = firstValue(values, "application_status", "permit_status", "application_state");
+  const applicationStatus = firstValue(values, "application_status", "permit_status", "application_state", "application");
   const status = firstValue(values, "status", "tenant_status")?.toLowerCase();
 
   return {
@@ -133,30 +139,59 @@ function tenantRows(payload: unknown): Tenant[] {
   return [];
 }
 
-function ownerNameParts(tenant: Tenant) {
+/** Raw name parts ("" when missing). Falls back to parsing owner_name for legacy records. */
+function splitOwner(tenant: Tenant) {
   if (tenant.last_name || tenant.first_name || tenant.middle_name) {
     return {
-      lastName: tenant.last_name || "—",
-      firstName: tenant.first_name || "—",
-      middleName: tenant.middle_name || "—",
+      lastName: tenant.last_name || "",
+      firstName: tenant.first_name || "",
+      middleName: tenant.middle_name || "",
     };
   }
 
   const owner = (tenant.owner_name || "").trim();
-  if (!owner) return { lastName: "—", firstName: "—", middleName: "—" };
+  if (!owner) return { lastName: "", firstName: "", middleName: "" };
 
   const [lastNamePart, givenNames = ""] = owner.split(",", 2).map((part) => part.trim());
   if (givenNames) {
     const [firstName, ...middleNames] = givenNames.split(/\s+/);
-    return { lastName: lastNamePart, firstName, middleName: middleNames.join(" ") || "—" };
+    return { lastName: lastNamePart, firstName, middleName: middleNames.join(" ") };
   }
 
   const names = owner.split(/\s+/);
+  if (names.length === 1) return { lastName: "", firstName: names[0], middleName: "" };
   return {
-    lastName: names.at(-1) || "—",
-    firstName: names[0] || "—",
-    middleName: names.slice(1, -1).join(" ") || "—",
+    lastName: names[names.length - 1],
+    firstName: names[0],
+    middleName: names.slice(1, -1).join(" "),
   };
+}
+
+/** Display version of the name parts ("—" when missing). */
+function ownerNameParts(tenant: Tenant) {
+  const parts = splitOwner(tenant);
+  return {
+    lastName: parts.lastName || "—",
+    firstName: parts.firstName || "—",
+    middleName: parts.middleName || "—",
+  };
+}
+
+function ApplicationBadge({ status }: { status: string }) {
+  if (!status || status === "—") return <span className="text-slate-400">—</span>;
+  const key = status.trim().toLowerCase();
+  const tone =
+    key === "approved" ? "bg-emerald-50 text-emerald-700 ring-emerald-200"
+    : key === "rejected" ? "bg-red-50 text-red-700 ring-red-200"
+    : key === "pending" ? "bg-amber-50 text-amber-700 ring-amber-200"
+    : key === "renew" ? "bg-sky-50 text-sky-700 ring-sky-200"
+    : key === "new" ? "bg-violet-50 text-violet-700 ring-violet-200"
+    : "bg-slate-100 text-slate-600 ring-slate-200";
+  return (
+    <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ring-inset ${tone}`}>
+      {status}
+    </span>
+  );
 }
 
 function FormField({
@@ -361,6 +396,15 @@ export default function TenantGroupPage({ group }: { group: TenantGroup }) {
     return () => controller.abort();
   }, [group.category, requestVersion]);
 
+  // Application status options come from the data, so values like "Renew" always work.
+  const applicationOptions = useMemo(() => {
+    const values = new Set<string>(BASE_APPLICATION_STATUSES);
+    tenants.forEach((tenant) => {
+      if (tenant.application_status && tenant.application_status !== "—") values.add(tenant.application_status);
+    });
+    return Array.from(values).sort((a, b) => a.localeCompare(b));
+  }, [tenants]);
+
   const filtered = useMemo(() => {
     const query = deferredSearch.trim().toLocaleLowerCase();
     return tenants.filter((tenant) => {
@@ -371,6 +415,9 @@ export default function TenantGroupPage({ group }: { group: TenantGroup }) {
         tenant.permit_number,
         tenant.business_name,
         tenant.owner_name,
+        tenant.last_name,
+        tenant.first_name,
+        tenant.middle_name,
         tenant.contact_number,
         tenant.stall_no,
         tenant.address,
@@ -388,6 +435,11 @@ export default function TenantGroupPage({ group }: { group: TenantGroup }) {
   const rangeStart = filtered.length ? (currentPage - 1) * PAGE_SIZE + 1 : 0;
   const rangeEnd = filtered.length ? Math.min(currentPage * PAGE_SIZE, filtered.length) : 0;
   const filtersActive = Boolean(search || applicationFilter || statusFilter);
+
+  // Form dropdown: all known options, plus the record's own value if it isn't listed yet.
+  const formApplicationOptions = Array.from(
+    new Set([...applicationOptions, form.application_status].filter((value) => value && value !== "—")),
+  );
 
   function retry() {
     setLoading(true);
@@ -421,6 +473,7 @@ export default function TenantGroupPage({ group }: { group: TenantGroup }) {
   }
 
   function openTenant(tenant: Tenant, mode: "view" | "edit") {
+    const parts = splitOwner(tenant);
     setEditingId(tenant.id);
     setDialogMode(mode);
     setForm({
@@ -428,10 +481,13 @@ export default function TenantGroupPage({ group }: { group: TenantGroup }) {
       broker_size: tenant.broker_size ?? "small",
       business_name: tenant.business_name,
       owner_name: tenant.owner_name ?? "",
+      last_name: parts.lastName,
+      first_name: parts.firstName,
+      middle_name: parts.middleName,
       contact_number: tenant.contact_number ?? "",
       stall_no: tenant.stall_no ?? "",
       address: tenant.address ?? "",
-      application_status: tenant.application_status,
+      application_status: tenant.application_status === "—" ? "New" : tenant.application_status,
       status: tenant.status,
       remarks: tenant.remarks ?? "",
     });
@@ -571,9 +627,9 @@ export default function TenantGroupPage({ group }: { group: TenantGroup }) {
               className={`${inputCls} mt-1.5`}
             >
               <option value="">All applications</option>
-              <option value="pending">Pending</option>
-              <option value="approved">Approved</option>
-              <option value="rejected">Rejected</option>
+              {applicationOptions.map((value) => (
+                <option key={value} value={value}>{value}</option>
+              ))}
             </select>
           </label>
           <label className="block text-xs font-semibold text-slate-600">
@@ -643,34 +699,30 @@ export default function TenantGroupPage({ group }: { group: TenantGroup }) {
                   </td>
                 </tr>
               ) : (
-                pageRows.map((tenant, index) => (
-                  <tr key={tenant.id} className="hover:bg-slate-50/80">
-                    {(() => {
-                      const owner = ownerNameParts(tenant);
-                      return (
-                        <>
-                    <td className="whitespace-nowrap px-4 py-3 font-medium text-slate-800">{tenant.permit_number || "—"}</td>
-                    <td className="px-4 py-3"><StatusBadge status={tenant.application_status} /></td>
-                    <td className="whitespace-nowrap px-4 py-3 text-slate-700">{owner.lastName}</td>
-                    <td className="whitespace-nowrap px-4 py-3 text-slate-700">{owner.firstName}</td>
-                    <td className="whitespace-nowrap px-4 py-3 text-slate-700">{owner.middleName}</td>
-                    <td className="whitespace-nowrap px-4 py-3 font-semibold text-slate-900">{tenant.business_name}</td>
-                    <td className="px-4 py-3 text-right">
-                      <TenantActions
-                        tenant={tenant}
-                        canEdit={canEdit}
-                        canDelete={canDelete}
-                        openUp={index >= pageRows.length - 2}
-                        onView={() => openTenant(tenant, "view")}
-                        onEdit={() => openTenant(tenant, "edit")}
-                        onDelete={() => requestDelete(tenant)}
-                      />
-                    </td>
-                        </>
-                      );
-                    })()}
-                  </tr>
-                ))
+                pageRows.map((tenant, index) => {
+                  const owner = ownerNameParts(tenant);
+                  return (
+                    <tr key={tenant.id} className="hover:bg-slate-50/80">
+                      <td className="whitespace-nowrap px-4 py-3 font-medium text-slate-800">{tenant.permit_number || "—"}</td>
+                      <td className="px-4 py-3"><ApplicationBadge status={tenant.application_status} /></td>
+                      <td className="whitespace-nowrap px-4 py-3 text-slate-700">{owner.lastName}</td>
+                      <td className="whitespace-nowrap px-4 py-3 text-slate-700">{owner.firstName}</td>
+                      <td className="whitespace-nowrap px-4 py-3 text-slate-700">{owner.middleName}</td>
+                      <td className="whitespace-nowrap px-4 py-3 font-semibold text-slate-900">{tenant.business_name}</td>
+                      <td className="px-4 py-3 text-right">
+                        <TenantActions
+                          tenant={tenant}
+                          canEdit={canEdit}
+                          canDelete={canDelete}
+                          openUp={index >= pageRows.length - 2}
+                          onView={() => openTenant(tenant, "view")}
+                          onEdit={() => openTenant(tenant, "edit")}
+                          onDelete={() => requestDelete(tenant)}
+                        />
+                      </td>
+                    </tr>
+                  );
+                })
               )}
             </tbody>
           </table>
@@ -693,6 +745,7 @@ export default function TenantGroupPage({ group }: { group: TenantGroup }) {
           ) : (
             pageRows.map((tenant) => {
               const isExpanded = expanded.has(tenant.id);
+              const owner = ownerNameParts(tenant);
               return (
                 <article key={tenant.id} className="p-4">
                   <div className="flex items-start gap-2">
@@ -719,21 +772,14 @@ export default function TenantGroupPage({ group }: { group: TenantGroup }) {
                     />
                   </div>
                   <div className="mt-3 flex flex-wrap gap-2">
-                    <StatusBadge status={tenant.application_status} />
+                    <ApplicationBadge status={tenant.application_status} />
                   </div>
                   {isExpanded && (
                     <div id={`tenant-details-${tenant.id}`} className="animate-fade mt-4 border-t border-slate-100 pt-4">
                       <dl className="grid grid-cols-2 gap-x-4 gap-y-4">
-                        {(() => {
-                          const owner = ownerNameParts(tenant);
-                          return (
-                            <>
-                              <Detail label="Last name" value={owner.lastName} />
-                              <Detail label="First name" value={owner.firstName} />
-                              <Detail label="Middle name" value={owner.middleName} />
-                            </>
-                          );
-                        })()}
+                        <Detail label="Last name" value={owner.lastName} />
+                        <Detail label="First name" value={owner.firstName} />
+                        <Detail label="Middle name" value={owner.middleName} />
                       </dl>
                     </div>
                   )}
@@ -796,9 +842,17 @@ export default function TenantGroupPage({ group }: { group: TenantGroup }) {
                       />
                     </FormField>
                   </div>
-                  <FormField label="Owner name">
-                    <input disabled={viewOnly} value={form.owner_name} onChange={(event) => setField("owner_name", event.target.value)} className={`${inputCls} ${disabledField} mt-1.5`} />
-                  </FormField>
+                  <div className="grid gap-4 sm:col-span-2 sm:grid-cols-3">
+                    <FormField label="Last name">
+                      <input disabled={viewOnly} value={form.last_name} onChange={(event) => setField("last_name", event.target.value)} className={`${inputCls} ${disabledField} mt-1.5`} />
+                    </FormField>
+                    <FormField label="First name">
+                      <input disabled={viewOnly} value={form.first_name} onChange={(event) => setField("first_name", event.target.value)} className={`${inputCls} ${disabledField} mt-1.5`} />
+                    </FormField>
+                    <FormField label="Middle name">
+                      <input disabled={viewOnly} value={form.middle_name} onChange={(event) => setField("middle_name", event.target.value)} className={`${inputCls} ${disabledField} mt-1.5`} />
+                    </FormField>
+                  </div>
                 </div>
               </section>
 
@@ -831,10 +885,10 @@ export default function TenantGroupPage({ group }: { group: TenantGroup }) {
                 </div>
                 <div className="grid gap-4 sm:grid-cols-2">
                   <FormField label="Application status">
-                    <select disabled={viewOnly} value={form.application_status} onChange={(event) => setField("application_status", event.target.value as ApplicationStatus)} className={`${inputCls} ${disabledField} mt-1.5`}>
-                      <option value="pending">Pending</option>
-                      <option value="approved">Approved</option>
-                      <option value="rejected">Rejected</option>
+                    <select disabled={viewOnly} value={form.application_status} onChange={(event) => setField("application_status", event.target.value)} className={`${inputCls} ${disabledField} mt-1.5`}>
+                      {formApplicationOptions.map((value) => (
+                        <option key={value} value={value}>{value}</option>
+                      ))}
                     </select>
                   </FormField>
                   <FormField label="Operational status">
