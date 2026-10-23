@@ -2,9 +2,11 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
 import {
+  ArrowLeft,
+  ChevronRight,
   ChevronDown,
   CircleParking,
   ClipboardList,
@@ -19,7 +21,7 @@ import {
 import { useAuth } from "@/context/AuthContext";
 import { useEntryModal } from "@/context/EntryModalContext";
 import type { Role } from "@/lib/api";
-import { TENANT_GROUPS } from "@/lib/tenant-groups";
+import TenantNavigation from "@/components/TenantNavigation";
 
 const NAV: { href: string; label: string; short: string; icon: LucideIcon; roles: Role[] }[] = [
   { href: "/dashboard", label: "Dashboard", short: "Home", icon: LayoutDashboard, roles: ["admin", "encoder", "viewer"] },
@@ -61,6 +63,21 @@ export default function Sidebar({ mobileOpen, onMobileClose, onMobileOpen }: Sid
   const { openNewEntry } = useEntryModal();
   const pathname = usePathname();
   const [tenantsOpen, setTenantsOpen] = useState(pathname.startsWith("/dashboard/tenants"));
+  const [mobileTenantView, setMobileTenantView] = useState<"auto" | "main" | "tenants">("auto");
+
+  const tenantsActive = pathname.startsWith("/dashboard/tenants");
+  const showMobileTenants = mobileTenantView === "tenants" || (mobileTenantView === "auto" && tenantsActive);
+
+  useEffect(() => {
+    if (!mobileOpen) return;
+    function handleEscape(event: KeyboardEvent) {
+      if (event.key !== "Escape") return;
+      if (showMobileTenants) setMobileTenantView("main");
+      else onMobileClose();
+    }
+    document.addEventListener("keydown", handleEscape);
+    return () => document.removeEventListener("keydown", handleEscape);
+  }, [mobileOpen, onMobileClose, showMobileTenants]);
 
   if (!user) return null;
 
@@ -75,8 +92,6 @@ export default function Sidebar({ mobileOpen, onMobileClose, onMobileOpen }: Sid
     .join("")
     .toUpperCase();
   const mobileItems = items.filter((item) => item.href !== "/dashboard/tenants");
-  const tenantsActive = pathname.startsWith("/dashboard/tenants");
-
   function handleNewEntry() {
     onMobileClose();
     openNewEntry();
@@ -101,9 +116,35 @@ export default function Sidebar({ mobileOpen, onMobileClose, onMobileOpen }: Sid
           )}
         </div>
 
-        <nav aria-label={drawer ? "Menu navigation" : "Main navigation"} className="min-h-0 flex-1 overflow-y-auto px-3 py-4">
-          <p className="mb-2 px-3 text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500">Main menu</p>
-          <div className="space-y-1">
+        <nav aria-label={drawer ? "Menu navigation" : "Main navigation"} className="flex min-h-0 flex-1 flex-col overflow-y-auto px-3 py-4">
+          {drawer && showMobileTenants ? (
+            <div className="flex min-h-0 flex-1 flex-col">
+              <div className="mb-3 flex items-center gap-2 border-b border-white/10 px-1 pb-3">
+                <button
+                  type="button"
+                  onClick={() => setMobileTenantView("main")}
+                  aria-label="Back to main navigation"
+                  className="grid h-9 w-9 shrink-0 place-items-center rounded-lg text-slate-300 transition-colors duration-150 hover:bg-white/10 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-300 motion-reduce:transition-none"
+                >
+                  <ArrowLeft size={17} />
+                </button>
+                <div>
+                  <p className="text-sm font-semibold text-white">FishPort Tenants</p>
+                  <p className="mt-0.5 text-[10px] text-slate-400">Choose a tenant group</p>
+                </div>
+              </div>
+              <TenantNavigation
+                id={tenantMenuId}
+                pathname={pathname}
+                mobile
+                onNavigate={onMobileClose}
+                onEscape={() => setMobileTenantView("main")}
+              />
+            </div>
+          ) : (
+          <>
+            <p className="mb-2 px-3 text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500">Main menu</p>
+            <div className="space-y-1">
             {items.map(({ href, label, icon: Icon }) => {
               const active = pathname === href || pathname.startsWith(`${href}/`);
               if (href === "/dashboard/tenants") {
@@ -111,8 +152,8 @@ export default function Sidebar({ mobileOpen, onMobileClose, onMobileOpen }: Sid
                   <div key={href}>
                     <button
                       type="button"
-                      onClick={() => setTenantsOpen((open) => !open)}
-                      aria-expanded={tenantsOpen}
+                      onClick={() => drawer ? setMobileTenantView("tenants") : setTenantsOpen((open) => !open)}
+                      aria-expanded={drawer ? showMobileTenants : tenantsOpen}
                       aria-controls={tenantMenuId}
                       className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-[13px] font-medium transition-colors ${
                         active ? "bg-[#0875d1] text-white shadow-sm" : "text-slate-300 hover:bg-white/8 hover:text-white"
@@ -120,27 +161,29 @@ export default function Sidebar({ mobileOpen, onMobileClose, onMobileOpen }: Sid
                     >
                       <Icon size={17} />
                       <span className="flex-1">{label}</span>
-                      <ChevronDown size={14} className={`transition-transform ${tenantsOpen ? "rotate-180" : ""}`} />
+                      {drawer ? (
+                        <ChevronRight size={14} />
+                      ) : (
+                        <ChevronDown size={14} className={`transition-transform duration-200 motion-reduce:transition-none ${tenantsOpen ? "rotate-180" : ""}`} />
+                      )}
                     </button>
-                    {tenantsOpen && (
-                      <div id={tenantMenuId} className="ml-4 mt-1 max-h-72 space-y-0.5 overflow-y-auto border-l border-white/15 py-1 pl-3">
-                        {TENANT_GROUPS.map((group) => {
-                          const groupHref = `/dashboard/tenants/${group.slug}`;
-                          const groupActive = pathname === groupHref;
-                          return (
-                            <Link
-                              key={group.slug}
-                              href={groupHref}
-                              onClick={onMobileClose}
-                              title={group.label}
-                              className={`block rounded-md px-2.5 py-2 text-[11px] leading-snug transition-colors ${
-                                groupActive ? "bg-sky-500/20 font-medium text-sky-100" : "text-slate-400 hover:bg-white/8 hover:text-white"
-                              }`}
-                            >
-                              {group.label}
-                            </Link>
-                          );
-                        })}
+                    {!drawer && (
+                      <div
+                        aria-hidden={!tenantsOpen}
+                        inert={!tenantsOpen}
+                        className={`grid transition-[grid-template-rows,opacity] duration-200 motion-reduce:transition-none ${
+                          tenantsOpen ? "grid-rows-[1fr] opacity-100" : "pointer-events-none grid-rows-[0fr] opacity-0"
+                        }`}
+                      >
+                        <div className="min-h-0 overflow-hidden">
+                          <div className="ml-2 mt-2 border-l border-white/15 pl-1">
+                            <TenantNavigation
+                              id={tenantMenuId}
+                              pathname={pathname}
+                              onEscape={() => setTenantsOpen(false)}
+                            />
+                          </div>
+                        </div>
                       </div>
                     )}
                   </div>
@@ -162,7 +205,9 @@ export default function Sidebar({ mobileOpen, onMobileClose, onMobileOpen }: Sid
                 </Link>
               );
             })}
-          </div>
+            </div>
+          </>
+          )}
         </nav>
 
         <div className="space-y-3 border-t border-white/10 p-3">
