@@ -3,7 +3,7 @@
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import {
-  Wallet, Clock, Plus, Fish, Ship, X, LoaderCircle,
+  Wallet, Clock, Plus, Fish, Ship, Truck, X, LoaderCircle,
 } from "lucide-react";
 import { api, formatDate, formatKg, formatPeso, Landing } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
@@ -68,11 +68,74 @@ interface DashboardData {
   year: number;
   month: number;
   years: number[];
+  by_route: {
+    land: { landings: number | string; value: number | string; weight: number | string };
+    sea: { landings: number | string; value: number | string; weight: number | string };
+  };
+  period_days: number | string;
 }
 
 type SpeciesRow = { name: string; volume: number };
 type MonthPoint = { label: string; full: string; volume: number; landings: number; amount: number };
 type SpeciesSlice = SpeciesRow & { percentage: number; color: string };
+
+type RouteTotals = { landings: number; value: number; weight: number };
+type ComparisonMetric = "landings" | "value" | "weight";
+
+const routeNumber = (route: DashboardData["by_route"]["land"] | undefined, key: ComparisonMetric) =>
+  Number(route?.[key] ?? 0) || 0;
+
+function percentage(value: number, total: number) {
+  return total > 0 ? (value / total) * 100 : 0;
+}
+
+function RouteComparison({
+  title, land, sea, format,
+}: {
+  title: string;
+  land: number;
+  sea: number;
+  format: (value: number) => string;
+}) {
+  const total = land + sea;
+  const landPct = percentage(land, total);
+  const seaPct = percentage(sea, total);
+  const hasData = total > 0;
+
+  return (
+    <article className="border-b border-slate-200 py-4 first:pt-0 last:border-b-0 last:pb-0">
+      <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+        <h3 className="text-sm font-semibold text-[#14263d]">{title}</h3>
+        {hasData && <span className="text-xs tabular-nums text-slate-500">Combined: {format(total)}</span>}
+      </div>
+      {hasData ? (
+        <>
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-x-5 gap-y-1 text-xs">
+            <span className="flex items-center gap-1.5 font-medium text-slate-700">
+              <span className="h-2.5 w-2.5 rounded-sm bg-[#34b981]" />
+              Land <strong className="tabular-nums text-[#14263d]">{landPct.toFixed(1)}%</strong> <span className="tabular-nums text-slate-500">- {format(land)}</span>
+            </span>
+            <span className="flex items-center gap-1.5 font-medium text-slate-700">
+              <span className="h-2.5 w-2.5 rounded-sm bg-[#0875d1]" />
+              Sea <strong className="tabular-nums text-[#14263d]">{seaPct.toFixed(1)}%</strong> <span className="tabular-nums text-slate-500">- {format(sea)}</span>
+            </span>
+          </div>
+          <div
+            className="mt-2 flex h-4 w-full overflow-hidden rounded-full bg-slate-100 shadow-inner"
+            role="img"
+            aria-label={`${title}: Land ${landPct.toFixed(1)} percent, Sea ${seaPct.toFixed(1)} percent`}
+          >
+            <div className="bg-[#34b981] transition-[width] duration-500 ease-out" style={{ width: `${landPct}%` }} />
+            <div className="bg-[#0875d1] transition-[width] duration-500 ease-out" style={{ width: `${seaPct}%` }} />
+          </div>
+          <p className="mt-2 text-xs text-slate-500">Combined total: <strong className="font-semibold tabular-nums text-[#14263d]">{format(total)}</strong></p>
+        </>
+      ) : (
+        <p className="mt-3 text-sm text-slate-500">No land or sea landings in this period.</p>
+      )}
+    </article>
+  );
+}
 
 /* ----------------------------- small pieces ----------------------------- */
 
@@ -272,6 +335,9 @@ export default function DashboardPage() {
     api<DashboardData>(`dashboard.php?year=${year}&month=${month}`)
       .then((d) => {
         if (ignore) return;
+        if (!d.by_route?.land || !d.by_route?.sea || !d.period_days) {
+          throw new Error("Dashboard analytics data is unavailable. Please deploy the latest dashboard API.");
+        }
         cache.current.set(key, d);
         setData(d);
         if (d.years?.length) setYears(d.years);
@@ -367,6 +433,18 @@ export default function DashboardPage() {
       }
     : null;
   const compareLabel = data?.compare_label ?? "";
+  const landRoute: RouteTotals = {
+    landings: routeNumber(data?.by_route?.land, "landings"),
+    value: routeNumber(data?.by_route?.land, "value"),
+    weight: routeNumber(data?.by_route?.land, "weight"),
+  };
+  const seaRoute: RouteTotals = {
+    landings: routeNumber(data?.by_route?.sea, "landings"),
+    value: routeNumber(data?.by_route?.sea, "value"),
+    weight: routeNumber(data?.by_route?.sea, "weight"),
+  };
+  const periodDays = Math.max(1, num(data?.period_days));
+  const averageDaily = (value: number) => value / periodDays;
 
   const toggleMonth = (n: number) => setMonth((prevMonth) => (prevMonth === String(n) ? "0" : String(n)));
 
@@ -542,6 +620,70 @@ export default function DashboardPage() {
           previous={prev?.species}
           compareLabel={compareLabel}
         />
+      </section>
+
+      <section aria-label="Land versus sea landing distribution" className={`${card} p-5`}>
+        <CardHeader
+          title="Land vs. Sea Landing Distribution"
+          subtitle={`How ${periodLabel} landings compare by records, value, and weight`}
+        />
+        {loading ? (
+          <div className="mt-4 space-y-4"><DashboardSkeleton className="h-20" /><DashboardSkeleton className="h-20" /><DashboardSkeleton className="h-20" /></div>
+        ) : (
+          <div className="mt-4">
+            <RouteComparison
+              title="Total Landings"
+              land={landRoute.landings}
+              sea={seaRoute.landings}
+              format={(value) => value.toLocaleString()}
+            />
+            <RouteComparison
+              title="Total Landing Value"
+              land={landRoute.value}
+              sea={seaRoute.value}
+              format={(value) => formatSummaryPeso(value)}
+            />
+            <RouteComparison
+              title="Total Weight"
+              land={landRoute.weight}
+              sea={seaRoute.weight}
+              format={(value) => formatKg(value)}
+            />
+          </div>
+        )}
+      </section>
+
+      <section aria-label="Average daily landing value">
+        <CardHeader title="Average Daily Landing Value" subtitle={`Based on ${periodDays.toLocaleString()} calendar days in ${periodLabel}`} />
+        <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3 lg:gap-4">
+          <KpiCard
+            label="Average Daily Value - Combined"
+            value={`${formatSummaryPeso(averageDaily(landRoute.value + seaRoute.value))}/day`}
+            compactValue={`${formatCompactPeso(averageDaily(landRoute.value + seaRoute.value))}/day`}
+            icon={Wallet}
+            tone="green"
+            hint={data ? "Land and Sea landing value" : "No data for this period"}
+            loading={loading}
+          />
+          <KpiCard
+            label="Average Daily Value - Land"
+            value={`${formatSummaryPeso(averageDaily(landRoute.value))}/day`}
+            compactValue={`${formatCompactPeso(averageDaily(landRoute.value))}/day`}
+            icon={Truck}
+            tone="blue"
+            hint={data ? "Land landing value only" : "No data for this period"}
+            loading={loading}
+          />
+          <KpiCard
+            label="Average Daily Value - Sea"
+            value={`${formatSummaryPeso(averageDaily(seaRoute.value))}/day`}
+            compactValue={`${formatCompactPeso(averageDaily(seaRoute.value))}/day`}
+            icon={Ship}
+            tone="green"
+            hint={data ? "Sea landing value only" : "No data for this period"}
+            loading={loading}
+          />
+        </div>
       </section>
 
       <section aria-label="Landing analytics" className="grid grid-cols-1 gap-4 lg:grid-cols-2 xl:grid-cols-12">

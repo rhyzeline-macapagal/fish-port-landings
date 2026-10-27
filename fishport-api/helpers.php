@@ -1,5 +1,5 @@
 <?php
-require_once __DIR__ . '/config.php';
+require_once dirname($_SERVER['SCRIPT_FILENAME']) . '/config.php';
 ini_set('display_errors', '0');
 
 $origin = $_SERVER['HTTP_ORIGIN'] ?? '';

@@ -61,10 +61,12 @@ export async function api<T = unknown>(path: string, options: RequestInit = {}):
   }
 
   if (!res.ok) {
-    const msg =
-      data && typeof data === "object" && "error" in data
-        ? String((data as { error: unknown }).error)
-        : `Request failed (${res.status})`;
+    const msg = data && typeof data === "object" && "error" in data
+      ? [
+          String((data as { error: unknown }).error),
+          "detail" in data && (data as { detail: unknown }).detail ? String((data as { detail: unknown }).detail) : "",
+        ].filter(Boolean).join(" ")
+      : `Request failed (${res.status})`;
     throw new Error(msg);
   }
 

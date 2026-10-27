@@ -735,9 +735,26 @@ export default function LandingsPage() {
 
   // Loads the card totals straight from the database, so they match the dashboard
   // no matter how many rows the list itself managed to load.
-  async function loadTotals(f: Filters) {
+  async function loadTotals(f: Filters, m: string) {
     const id = ++totalsReq.current;
     try {
+      const hasExtraFilters = Object.entries(f).some(([key, value]) =>
+        value && key !== "year" && key !== "from" && key !== "to"
+      );
+      const isDashboardScope = !hasExtraFilters && (!m || m === "0" || (!!f.from && !!f.to));
+      if (isDashboardScope) {
+        const monthParam = m && m !== "0" ? `&month=${m}` : "&month=0";
+        const dashboard = await api<{ total_landings: number | string; total_volume: number | string; total_value: number | string }>(
+          `dashboard.php?year=${encodeURIComponent(f.year || THIS_YEAR)}${monthParam}`
+        );
+        if (id !== totalsReq.current) return;
+        setTotals({
+          count: Number(dashboard.total_landings) || 0,
+          volume: Number(dashboard.total_volume) || 0,
+          value: Number(dashboard.total_value) || 0,
+        });
+        return;
+      }
       const params: Record<string, string> = Object.fromEntries(buildQs(f));
       params.summary = "1";
       if (!f.status) params.exclude_rejected = "1";
@@ -1013,10 +1030,12 @@ export default function LandingsPage() {
     } else {
       loadTop(f);
       loadPrev(f, m);
-      loadTotals(f);
+      loadTotals(f, m);
     }
     try {
-      const all = await fetchAllLandings(Object.fromEntries(buildQs(f)), controller.signal);
+      const params: Record<string, string> = Object.fromEntries(buildQs(f));
+      if (!f.status) params.exclude_rejected = "1";
+      const all = await fetchAllLandings(params, controller.signal);
       if (id !== listReq.current) return;
       // Guard against a row appearing on two pages
       setRows(Array.from(new Map(all.map((r) => [r.id, r])).values()));

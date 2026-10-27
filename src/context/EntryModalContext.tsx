@@ -23,11 +23,14 @@ const C = createContext<Ctx | null>(null);
 export function EntryModalProvider({ children }: { children: ReactNode }) {
   const [open, setOpen] = useState(false);
   const [version, setVersion] = useState(0);
+  const [toast, setToast] = useState("");
   const openNewEntry = useCallback(() => setOpen(true), []);
   const close = useCallback(() => setOpen(false), []);
   const saved = useCallback(() => {
     setOpen(false);
     setVersion((v) => v + 1);
+    setToast("Landing recorded successfully.");
+    window.setTimeout(() => setToast(""), 3500);
   }, []);
   const value = useMemo(() => ({ openNewEntry, version }), [openNewEntry, version]);
 
@@ -35,6 +38,13 @@ export function EntryModalProvider({ children }: { children: ReactNode }) {
     <C.Provider value={value}>
       {children}
       {open && <NewLandingModal onClose={close} onSaved={saved} />}
+      {toast && (
+        <div className="fixed right-4 top-4 z-[70] animate-fade" role="status" aria-live="polite">
+          <div className="rounded-lg border border-emerald-200 bg-white px-4 py-3 text-sm font-medium text-emerald-700 shadow-lg">
+            {toast}
+          </div>
+        </div>
+      )}
     </C.Provider>
   );
 }

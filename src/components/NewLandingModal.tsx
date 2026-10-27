@@ -424,8 +424,9 @@ export default function NewLandingModal({ onClose, onSaved }: { onClose: () => v
         }),
       });
 
-      // Trip is saved: remember any new names in the database
-      await Promise.all([
+      // The landing is already saved; lookup refreshes should not turn a successful
+      // record into an error if one optional lookup request fails.
+      await Promise.allSettled([
         ...payloadItems.map((it) => saveLookup("species", it.species)),
         ...(broker ? [saveLookup("brokers", broker)] : []),
         ...(owner ? [saveLookup("owners", owner)] : []),

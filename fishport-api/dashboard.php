@@ -1,5 +1,5 @@
 <?php
-require_once __DIR__ . '/helpers.php';
+require_once dirname($_SERVER['SCRIPT_FILENAME']) . '/helpers.php';
 auth_user(['admin', 'encoder', 'viewer']);
 
 $pdo = db();
@@ -83,6 +83,35 @@ $st = $pdo->prepare(
 );
 $st->execute($range);
 $out['pending_review'] = (int)$st->fetchColumn();
+
+// Land and sea totals for the selected reporting period. A truck delivery is land;
+// records without truck delivery are sea, matching the landing list convention.
+$st = $pdo->prepare(
+  "SELECT
+      SUM(CASE WHEN truck_delivery = 1 THEN 1 ELSE 0 END) AS landings_land,
+      SUM(CASE WHEN truck_delivery <> 1 OR truck_delivery IS NULL THEN 1 ELSE 0 END) AS landings_sea,
+      COALESCE(SUM(CASE WHEN truck_delivery = 1 THEN total_value ELSE 0 END), 0) AS value_land,
+      COALESCE(SUM(CASE WHEN truck_delivery <> 1 OR truck_delivery IS NULL THEN total_value ELSE 0 END), 0) AS value_sea,
+      COALESCE(SUM(CASE WHEN truck_delivery = 1 THEN $vol ELSE 0 END), 0) AS weight_land,
+      COALESCE(SUM(CASE WHEN truck_delivery <> 1 OR truck_delivery IS NULL THEN $vol ELSE 0 END), 0) AS weight_sea
+   FROM fp_landings
+   WHERE status <> 'rejected' AND landing_date BETWEEN ? AND ?"
+);
+$st->execute($range);
+$route = $st->fetch() ?: [];
+$out['by_route'] = [
+  'land' => [
+    'landings' => (int)($route['landings_land'] ?? 0),
+    'value'    => (float)($route['value_land'] ?? 0),
+    'weight'   => (float)($route['weight_land'] ?? 0),
+  ],
+  'sea' => [
+    'landings' => (int)($route['landings_sea'] ?? 0),
+    'value'    => (float)($route['value_sea'] ?? 0),
+    'weight'   => (float)($route['weight_sea'] ?? 0),
+  ],
+];
+$out['period_days'] = $start->diff($end)->days + 1;
 
 // Volume by species (all species)
 $st = $pdo->prepare(

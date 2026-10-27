@@ -1,5 +1,5 @@
 <?php
-require_once __DIR__ . '/helpers.php';
+require_once dirname($_SERVER['SCRIPT_FILENAME']) . '/helpers.php';
 
 /* ------------------------------------------------------------------
  * Filter helpers (GET)
@@ -53,8 +53,10 @@ function lf_where(array $g, bool $isTop): array {
     array_push($p, ...$vals);
   }
 
-  // Leaderboards ignore rejected entries unless a status was asked for.
-  if ($isTop && !lf_list($g, 'status')) $w[] = "status <> 'rejected'";
+  // Dashboard-aligned totals and lists ignore rejected entries unless a status was asked for.
+  if (($isTop || ($g['exclude_rejected'] ?? '') === '1') && !lf_list($g, 'status')) {
+    $w[] = "status <> 'rejected'";
+  }
 
   // By land (truck delivery) / by sea (landed at port, no truck).
   $d = strtolower((string)($g['delivery'] ?? ''));
@@ -202,7 +204,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET') {
   // thousands of full landing rows that the browser would only sum again.
   if (($g['summary'] ?? '') === '1') {
     [$w, $p] = lf_where($g, false);
-    if (($g['exclude_rejected'] ?? '') === '1') $w[] = "status <> 'rejected'";
 
     $st = db()->prepare(
       'SELECT COUNT(*) AS count,
@@ -451,8 +452,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     $species = trim((string)($it['species'] ?? ''));
     if ($species === '') json_out(['error' => "Species $n: species is required"], 422);
-    if (isset($seen[mb_strtolower($species)])) json_out(['error' => "$species is listed more than once"], 422);
-    $seen[mb_strtolower($species)] = true;
+    $speciesKey = strtolower($species);
+    if (isset($seen[$speciesKey])) json_out(['error' => "$species is listed more than once"], 422);
+    $seen[$speciesKey] = true;
 
     if (!is_numeric($it['volume'] ?? null) || !is_numeric($it['total_value'] ?? null)) {
       json_out(['error' => "Species $n: volume and total value must be numbers"], 422);
@@ -488,9 +490,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $st = $pdo->prepare(
       'INSERT INTO fp_landings
        (trip_id, landing_date, landing_time, boat_name, fishing_gear, origin, truck_delivery, plate_number,
-        boat_owner, fishing_ground, species, volume, unit, price_per_kg, total_value, broker, quality,
+        boat_owner, species, volume, unit, price_per_kg, total_value, broker, quality,
         remarks, created_by)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
+             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
     );
     foreach ($items as $k => $it) {
       $st->execute([
@@ -503,7 +505,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $isLand ? 1 : 0,
         $plate,
         $b['boat_owner'] ?? null,
-        $b['fishing_ground'] ?? null,
         $it['species'],
         $it['volume'],
         $it['unit'],
@@ -519,7 +520,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $pdo->commit();
   } catch (Throwable $e) {
     $pdo->rollBack();
-    throw $e;
+    error_log('Landing insert failed: ' . $e->getMessage());
+    json_out([
+      'error' => 'Could not save the landing.',
+      'detail' => $e->getMessage(),
+      'reference' => 'landing-insert-failed',
+    ], 500);
   }
 
   json_out(['id' => $firstId, 'trip_id' => $tripId, 'rows' => count($items), 'status' => 'pending'], 201);
