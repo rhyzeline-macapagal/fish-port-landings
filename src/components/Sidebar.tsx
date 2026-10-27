@@ -39,7 +39,7 @@ function Logo({ compact = false }: { compact?: boolean }) {
       }`}
     >
       <span className="relative h-11 w-11 shrink-0 overflow-hidden rounded-xl ring-1 ring-white/25 shadow-[0_5px_18px_rgba(1,16,29,0.28)]">
-        <Image src="/fishport_1.jpg" alt="" fill sizes="44px" priority className="object-cover" />
+        <Image src="/logo.png" alt="" fill sizes="44px" priority className="object-cover" />
       </span>
       {!compact && (
         <span className="min-w-0 overflow-hidden leading-none">

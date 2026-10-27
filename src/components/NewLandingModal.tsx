@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, KeyboardEvent, ReactNode, useEffect, useMemo, useRef, useState } from "react";
-import { Check, ChevronDown, ClipboardCheck, Fish, Info, ListChecks, Plus, Ship, Trash2, Truck } from "lucide-react";
+import { Check, ChevronDown, Fish, Plus, Ship, Trash2, Truck } from "lucide-react";
 import { api, formatPeso } from "@/lib/api";
 import Modal from "@/components/Modal";
 import { saveLookup, useLookups } from "@/lib/lookups";
@@ -277,12 +277,6 @@ type Item = {
 };
 
 const MAX_ITEMS = 30;
-const STEPS = [
-  { label: "Basic details", hint: "Schedule and delivery", icon: Info },
-  { label: "Catch details", hint: "Species and pricing", icon: Fish },
-  { label: "Additional", hint: "Broker and remarks", icon: ListChecks },
-  { label: "Review", hint: "Confirm before saving", icon: ClipboardCheck },
-] as const;
 
 export default function NewLandingModal({ onClose, onSaved }: { onClose: () => void; onSaved: () => void }) {
   // Trip-level fields. Names match the PHP API: boat_name = producer,
@@ -312,19 +306,20 @@ export default function NewLandingModal({ onClose, onSaved }: { onClose: () => v
     total_value: "",
     quality: base?.quality ?? "Fresh",
   });
-  const [items, setItems] = useState<Item[]>(() => [{
-    uid: 1,
-    species: "",
-    volume: "",
-    unit: "kg",
-    price_per_kg: "",
-    total_value: "",
-    quality: "Fresh",
-  }]);
+  const [items, setItems] = useState<Item[]>(() => [
+    {
+      uid: 1,
+      species: "",
+      volume: "",
+      unit: "kg",
+      price_per_kg: "",
+      total_value: "",
+      quality: "Fresh",
+    },
+  ]);
 
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
-  const [step, setStep] = useState(0);
 
   // Dropdown names come only from the database
   const saved = useLookups();
@@ -365,52 +360,36 @@ export default function NewLandingModal({ onClose, onSaved }: { onClose: () => v
   const grandValue = items.reduce((s, it) => s + (parseFloat(it.total_value) || 0), 0);
   const grandKg = items.reduce((s, it) => s + (parseFloat(it.volume) || 0) * (it.unit === "ton" ? 1000 : 1), 0);
 
-  function validationMessage(target: number) {
-    if (target === 0) {
-      if (!f.landing_date) return "Choose the landing date.";
-      if (!f.truck_delivery && !clean(f.boat_name)) return "Choose or enter the producer for a sea landing.";
-      if (f.truck_delivery && !clean(f.origin)) return "Enter the origin for a land delivery.";
-      if (f.truck_delivery && !clean(f.plate_number)) return "Enter the plate number for a land delivery.";
-      if (!clean(f.boat_owner)) return "Choose or enter the registered owner.";
-    }
-    if (target === 1) {
-      const seen = new Set<string>();
-      for (let i = 0; i < items.length; i++) {
-        const it = items[i];
-        const tag = items.length > 1 ? `Species ${i + 1}: ` : "";
-        const name = canonical(it.species, speciesOptions);
-        if (!name) return `${tag}Choose a species or type one.`;
-        if (seen.has(name.toLowerCase())) return `${name} is listed more than once. Combine them into one line.`;
-        seen.add(name.toLowerCase());
-        if (!it.volume || Number(it.volume) <= 0) return `${tag}Enter the volume.`;
-        if (!it.price_per_kg || Number(it.price_per_kg) <= 0) return `${tag}Enter the price per kg.`;
-        if (it.total_value === "" || Number(it.total_value) < 0) return `${tag}Enter the total value.`;
-      }
+  function validationMessage() {
+    if (!f.landing_date) return "Choose the landing date.";
+    if (!f.truck_delivery && !clean(f.boat_name)) return "Choose or enter the producer for a sea landing.";
+    if (f.truck_delivery && !clean(f.origin)) return "Enter the origin for a land delivery.";
+    if (f.truck_delivery && !clean(f.plate_number)) return "Enter the plate number for a land delivery.";
+    if (!clean(f.boat_owner)) return "Choose or enter the registered owner.";
+
+    const seen = new Set<string>();
+    for (let i = 0; i < items.length; i++) {
+      const it = items[i];
+      const tag = items.length > 1 ? `Species ${i + 1}: ` : "";
+      const name = canonical(it.species, speciesOptions);
+      if (!name) return `${tag}Choose a species or type one.`;
+      if (seen.has(name.toLowerCase())) return `${name} is listed more than once. Combine them into one line.`;
+      seen.add(name.toLowerCase());
+      if (!it.volume || Number(it.volume) <= 0) return `${tag}Enter the volume.`;
+      if (!it.price_per_kg || Number(it.price_per_kg) <= 0) return `${tag}Enter the price per kg.`;
+      if (it.total_value === "" || Number(it.total_value) < 0) return `${tag}Enter the total value.`;
     }
     return "";
-  }
-
-  function nextStep() {
-    const message = validationMessage(step);
-    if (message) {
-      setError(message);
-      return;
-    }
-    setError("");
-    setStep((current) => Math.min(STEPS.length - 1, current + 1));
   }
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
     setError("");
 
-    for (const target of [0, 1]) {
-      const message = validationMessage(target);
-      if (message) {
-        setStep(target);
-        setError(message);
-        return;
-      }
+    const message = validationMessage();
+    if (message) {
+      setError(message);
+      return;
     }
 
     const broker = canonical(f.broker, brokerOptions);
@@ -469,47 +448,8 @@ export default function NewLandingModal({ onClose, onSaved }: { onClose: () => v
       onClose={onClose}
     >
       <form onSubmit={onSubmit} noValidate>
-        <div className="flex min-h-[560px] flex-col md:flex-row">
-          <aside className="border-b border-slate-200 bg-slate-50 p-4 md:w-56 md:shrink-0 md:border-b-0 md:border-r md:p-5">
-            <ol className="grid grid-cols-4 gap-2 md:grid-cols-1" aria-label="Landing entry steps">
-              {STEPS.map(({ label, hint, icon: Icon }, index) => {
-                const active = step === index;
-                const complete = step > index;
-                return (
-                  <li key={label}>
-                    <button
-                      type="button"
-                      onClick={() => index <= step && setStep(index)}
-                      aria-current={active ? "step" : undefined}
-                      className={`flex w-full min-w-0 items-center gap-3 rounded-lg p-2.5 text-left transition-colors ${
-                        active ? "bg-white text-[#14263d] shadow-sm ring-1 ring-slate-200" : complete ? "text-emerald-700" : "text-slate-500"
-                      }`}
-                    >
-                      <span className={`grid h-8 w-8 shrink-0 place-items-center rounded-full text-xs font-semibold ${
-                        active ? "bg-[#0875d1] text-white" : complete ? "bg-emerald-100 text-emerald-700" : "bg-slate-200 text-slate-600"
-                      }`}>
-                        {complete ? <Check size={15} /> : <Icon size={15} />}
-                      </span>
-                      <span className="hidden min-w-0 md:block">
-                        <span className="block truncate text-sm font-semibold">{label}</span>
-                        <span className="block truncate text-[11px] font-normal text-slate-500">{hint}</span>
-                      </span>
-                    </button>
-                  </li>
-                );
-              })}
-            </ol>
-          </aside>
-
-          <div className="min-w-0 flex-1 bg-slate-50/40 px-4 py-5 sm:px-6">
-            <div className="mb-5">
-              <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#0875d1]">Step {step + 1} of {STEPS.length}</p>
-              <h3 className="mt-1 text-lg font-semibold text-slate-900">{STEPS[step].label}</h3>
-              <p className="mt-0.5 text-sm text-slate-500">{STEPS[step].hint}</p>
-            </div>
-
-            <div className="space-y-4">
-          {step === 0 && <>
+        <div className="space-y-4 bg-slate-50/40 px-4 py-5 sm:px-6">
+          {/* Schedule */}
           <Section title="Schedule">
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <Field label="Date" htmlFor="landing-date" required>
@@ -534,6 +474,7 @@ export default function NewLandingModal({ onClose, onSaved }: { onClose: () => v
             </div>
           </Section>
 
+          {/* Delivery */}
           <Section title="Delivery">
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2" role="radiogroup" aria-label="Delivery">
               {DELIVERY.map(({ label, hint, value, icon: Icon }) => {
@@ -635,9 +576,8 @@ export default function NewLandingModal({ onClose, onSaved }: { onClose: () => v
             </div>
           </Section>
 
-          </>}
-
-          {step === 1 && <Section title="Catch and pricing">
+          {/* Catch and pricing */}
+          <Section title="Catch and pricing">
             <div className="space-y-4">
               {items.map((it, i) => (
                 <div key={it.uid} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
@@ -750,14 +690,15 @@ export default function NewLandingModal({ onClose, onSaved }: { onClose: () => v
                 </div>
               )}
             </div>
-          </Section>}
+          </Section>
 
-          {step === 2 && <Section title="Broker and remarks">
+          {/* Broker and remarks */}
+          <Section title="Broker and remarks">
             <div className="grid grid-cols-1 gap-4">
               <Field label="Broker" htmlFor="broker">
                 <Combobox
                   id="broker"
-                  drop="down"
+                  drop="up"
                   value={f.broker}
                   onChange={(v) => update({ broker: v })}
                   options={brokerOptions}
@@ -776,48 +717,14 @@ export default function NewLandingModal({ onClose, onSaved }: { onClose: () => v
                 />
               </Field>
             </div>
-          </Section>}
-
-          {step === 3 && (
-            <div className="space-y-4">
-              <Section title="Landing summary">
-                <dl className="grid grid-cols-1 gap-4 text-sm sm:grid-cols-2">
-                  <div><dt className="text-xs text-slate-500">Schedule</dt><dd className="mt-1 font-medium text-slate-900">{f.landing_date}{f.landing_time ? ` at ${f.landing_time}` : ""}</dd></div>
-                  <div><dt className="text-xs text-slate-500">Delivery route</dt><dd className="mt-1 font-medium text-slate-900">{f.truck_delivery ? "By land" : "By sea"}</dd></div>
-                  <div><dt className="text-xs text-slate-500">Supplier / origin</dt><dd className="mt-1 font-medium text-slate-900">{f.truck_delivery ? f.origin : f.boat_name}</dd></div>
-                  <div><dt className="text-xs text-slate-500">Registered owner</dt><dd className="mt-1 font-medium text-slate-900">{f.boat_owner}</dd></div>
-                  {f.truck_delivery && <div><dt className="text-xs text-slate-500">Plate number</dt><dd className="mt-1 font-medium uppercase text-slate-900">{f.plate_number}</dd></div>}
-                  {!f.truck_delivery && <div><dt className="text-xs text-slate-500">Fishing gear</dt><dd className="mt-1 font-medium text-slate-900">{f.fishing_gear || "Not provided"}</dd></div>}
-                  <div><dt className="text-xs text-slate-500">Broker</dt><dd className="mt-1 font-medium text-slate-900">{f.broker || "Not provided"}</dd></div>
-                  <div><dt className="text-xs text-slate-500">New status</dt><dd className="mt-1"><span className="rounded-full bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-700">Pending review</span></dd></div>
-                </dl>
-              </Section>
-
-              <Section title={`Catch summary (${items.length} ${items.length === 1 ? "species" : "species"})`}>
-                <div className="overflow-x-auto">
-                  <table className="w-full min-w-[520px] text-left text-sm">
-                    <thead className="border-b border-slate-200 text-xs text-slate-500"><tr><th className="pb-2 font-medium">Species</th><th className="pb-2 text-right font-medium">Volume</th><th className="pb-2 text-right font-medium">Price / kg</th><th className="pb-2 text-right font-medium">Total</th></tr></thead>
-                    <tbody className="divide-y divide-slate-100">
-                      {items.map((item) => <tr key={item.uid}><td className="py-3 font-medium text-slate-900">{item.species}</td><td className="py-3 text-right tabular-nums">{item.volume} {item.unit}</td><td className="py-3 text-right tabular-nums">{formatPeso(Number(item.price_per_kg) || 0)}</td><td className="py-3 text-right font-semibold tabular-nums">{formatPeso(Number(item.total_value) || 0)}</td></tr>)}
-                    </tbody>
-                  </table>
-                </div>
-                <div className="mt-4 flex justify-end gap-6 rounded-lg bg-slate-50 p-3 text-sm">
-                  <span><span className="text-slate-500">Volume</span> <strong className="ml-1 tabular-nums">{grandKg.toLocaleString()} kg</strong></span>
-                  <span><span className="text-slate-500">Value</span> <strong className="ml-1 tabular-nums">{formatPeso(grandValue)}</strong></span>
-                </div>
-              </Section>
-            </div>
-          )}
+          </Section>
 
           {error && (
             <p className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p>
           )}
-            </div>
-          </div>
         </div>
 
-        <div className="sticky bottom-0 flex items-center justify-between gap-3 border-t border-slate-200 bg-white px-4 py-4 sm:px-6">
+        <div className="sticky bottom-0 flex items-center justify-end gap-2 border-t border-slate-200 bg-white px-4 py-4 sm:px-6">
           <button
             type="button"
             onClick={onClose}
@@ -825,34 +732,13 @@ export default function NewLandingModal({ onClose, onSaved }: { onClose: () => v
           >
             Cancel
           </button>
-          <div className="flex items-center gap-2">
-            {step > 0 && (
-              <button
-                type="button"
-                onClick={() => { setError(""); setStep((current) => current - 1); }}
-                className="rounded-lg border border-slate-300 bg-white px-5 py-2.5 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
-              >
-                Back
-              </button>
-            )}
-            {step < STEPS.length - 1 ? (
-              <button
-                type="button"
-                onClick={nextStep}
-                className="rounded-lg bg-[#0875d1] px-6 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-[#1a8cc7] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400/40"
-              >
-                Continue
-              </button>
-            ) : (
-              <button
-                type="submit"
-                disabled={busy}
-                className="rounded-lg bg-[#0875d1] px-6 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-[#1a8cc7] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400/40 disabled:opacity-60"
-              >
-                {busy ? "Saving..." : items.length > 1 ? `Save landing (${items.length} species)` : "Save landing"}
-              </button>
-            )}
-          </div>
+          <button
+            type="submit"
+            disabled={busy}
+            className="rounded-lg bg-[#0875d1] px-6 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-[#1a8cc7] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400/40 disabled:opacity-60"
+          >
+            {busy ? "Saving..." : items.length > 1 ? `Save landing (${items.length} species)` : "Save landing"}
+          </button>
         </div>
       </form>
     </Modal>

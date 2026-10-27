@@ -16,6 +16,6 @@ try {
 // Frontend origins allowed to call this API (add your Vercel URL after deploying)
 define('ALLOWED_ORIGINS', [
   'http://localhost:3000',
-  // 'https://your-fishport.vercel.app',
+  'https://mercedes-municipal-fishport.vercel.app',
 ]);
 

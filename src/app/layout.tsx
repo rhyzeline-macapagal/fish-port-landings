@@ -12,7 +12,7 @@ const beVietnam = Be_Vietnam_Pro({
 
 export const metadata: Metadata = {
   title: "Mercedes FishPort",
-  icons: { icon: "/fishport_1.jpg" },
+  icons: { icon: "/logo.png" },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

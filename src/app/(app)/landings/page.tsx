@@ -628,6 +628,9 @@ export default function LandingsPage() {
   const [rows, setRows] = useState<Landing[]>([]);
   const [prev, setPrev] = useState<{ label: string; stats: ReturnType<typeof normalizedSummary> } | null>(null);
   const prevReq = useRef(0);
+  // Totals for the cards come straight from the database (same rules as the dashboard)
+  const [totals, setTotals] = useState<ReturnType<typeof normalizedSummary> | null>(null);
+  const totalsReq = useRef(0);
   const topReq = useRef(0);
   const listReq = useRef(0);
   const listAbort = useRef<AbortController | null>(null);
@@ -730,6 +733,22 @@ export default function LandingsPage() {
     }
   }
 
+  // Loads the card totals straight from the database, so they match the dashboard
+  // no matter how many rows the list itself managed to load.
+  async function loadTotals(f: Filters) {
+    const id = ++totalsReq.current;
+    try {
+      const params: Record<string, string> = Object.fromEntries(buildQs(f));
+      params.summary = "1";
+      if (!f.status) params.exclude_rejected = "1";
+      const res = await api<LandingSummary | Landing[]>(`landings.php?${new URLSearchParams(params).toString()}`);
+      if (id !== totalsReq.current) return;
+      setTotals(Array.isArray(res) ? summarize(res, !f.status) : normalizedSummary(res));
+    } catch {
+      if (id === totalsReq.current) setTotals(null);
+    }
+  }
+
   function goToRecords(status?: "pending") {
     if (status) apply({ status });
     // The container stays mounted while loading, so it's safe to scroll right away.
@@ -771,15 +790,26 @@ export default function LandingsPage() {
     ].join("  |  ");
   }
 
-  // Fetch in large bounded pages to avoid repeated high-latency round trips.
+  // Fetch in pages until the server returns nothing new, whatever its page-size cap is.
   async function fetchAllLandings(params: Record<string, string>, signal?: AbortSignal) {
     const PAGE = 5000;
     const out: Landing[] = [];
-    for (let offset = 0; ; offset += PAGE) {
+    const seen = new Set<number>();
+    let offset = 0;
+    for (let guard = 0; guard < 50; guard++) {
       const qs = new URLSearchParams({ ...params, limit: String(PAGE), offset: String(offset) });
       const chunk = await api<Landing[]>(`landings.php?${qs.toString()}`, { signal });
-      out.push(...chunk);
-      if (chunk.length < PAGE) break;
+      if (chunk.length === 0) break;
+      let added = 0;
+      for (const r of chunk) {
+        if (!seen.has(r.id)) {
+          seen.add(r.id);
+          out.push(r);
+          added++;
+        }
+      }
+      if (added === 0) break; // server ignored the offset, avoid looping forever
+      offset += chunk.length;
     }
     return out;
   }
@@ -971,15 +1001,19 @@ export default function LandingsPage() {
     setPrev(null);
     if (f.q.trim()) {
       // Free-text LIKE searches are the most expensive database operation.
-      // Keep them to one query; rankings and historical comparisons can load
-      // again as soon as the search is cleared.
+      // Keep them to one query; rankings, totals and historical comparisons
+      // can load again as soon as the search is cleared. While searching, the
+      // cards fall back to the loaded rows.
       topReq.current += 1;
       prevReq.current += 1;
+      totalsReq.current += 1;
       setTop(null);
       setTopLoading(false);
+      setTotals(null);
     } else {
       loadTop(f);
       loadPrev(f, m);
+      loadTotals(f);
     }
     try {
       const all = await fetchAllLandings(Object.fromEntries(buildQs(f)), controller.signal);
@@ -1195,7 +1229,8 @@ export default function LandingsPage() {
     [rows, skipRejected],
   );
   const rejectedCount = rows.length - countable.length;
-  const cur = useMemo(() => summarize(rows, skipRejected), [rows, skipRejected]);
+  const rowTotals = useMemo(() => summarize(rows, skipRejected), [rows, skipRejected]);
+  const cur = totals ?? rowTotals; // database totals first, loaded rows as a fallback
   const prevStats = prev?.stats ?? null;
   const totalValue = cur.value;
   const tripCount = cur.count;

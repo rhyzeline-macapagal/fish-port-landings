@@ -58,7 +58,7 @@ export default function LoginPage() {
         <div className="relative flex items-center gap-3">
           <div className="relative h-14 w-14 shrink-0 overflow-hidden rounded-2xl ring-1 ring-white/25 shadow-lg">
             <Image
-              src="/fishport_1.jpg"
+              src="/logo.png"
               alt="Mercedes FishPort"
               fill
               sizes="56px"
@@ -89,13 +89,13 @@ export default function LoginPage() {
           {/* Logo (visible on mobile, too) */}
           <div className="mb-8 flex items-center gap-3 lg:hidden">
             <span className="relative h-11 w-11 shrink-0 overflow-hidden rounded-xl shadow-sm ring-1 ring-slate-200">
-              <Image src="/fishport_1.jpg" alt="Mercedes FishPort" fill sizes="44px" className="object-cover" priority />
+              <Image src="/fishport.jpg" alt="Mercedes FishPort" fill sizes="44px" className="object-cover" priority />
             </span>
             <div className="leading-tight">
               <p className="font-bold">FishPort</p>
               <p className="text-sm text-slate-500">Statistics</p>
             </div>
-          </div>
+          </div> 
 
           <h1 className="text-3xl font-bold tracking-tight text-slate-900">
             Welcome back
