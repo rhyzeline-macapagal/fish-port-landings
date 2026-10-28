@@ -8,7 +8,7 @@ import AppShell from "@/components/AppShell";
 
 // Pages a viewer is allowed to open
 const viewerCanOpen = (pathname: string) =>
-  pathname === "/dashboard" || pathname === "/parking" || pathname.startsWith("/dashboard/tenants");
+  pathname === "/dashboard" || pathname === "/parking" || pathname === "/species" || pathname.startsWith("/dashboard/tenants");
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();

@@ -76,6 +76,19 @@ if (!in_array($thisYear, $years, true)) {
 $out  = fp_period_totals($pdo, $vol, $range);
 $out['prev'] = fp_period_totals($pdo, $vol, $prevRange);
 
+// The record coverage range explains a new comparison period when the
+// previous period has no records.
+$st = $pdo->prepare(
+  "SELECT MIN(landing_date) AS first_date,
+          MAX(landing_date) AS last_date
+   FROM fp_landings
+   WHERE landing_date IS NOT NULL"
+);
+$st->execute();
+$recordCoverage = $st->fetch() ?: [];
+$out['record_start_date'] = $recordCoverage['first_date'] ?: null;
+$out['record_end_date'] = $recordCoverage['last_date'] ?: null;
+
 // Pending review (selected period only)
 $st = $pdo->prepare(
   "SELECT COUNT(*) FROM fp_landings

@@ -1,5 +1,5 @@
 <?php
-require_once __DIR__ . '/helpers.php';
+require_once dirname($_SERVER['SCRIPT_FILENAME']) . '/helpers.php';
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
   json_out(['error' => 'Method not allowed'], 405);
@@ -9,7 +9,7 @@ $u = auth_user(['admin']);
 $b = body();
 
 $status = $b['status'] ?? '';
-if ($status !== 'approved') {
+if (!in_array($status, ['approved', 'rejected'], true)) {
   json_out(['error' => 'Invalid status'], 422);
 }
 

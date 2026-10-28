@@ -117,7 +117,7 @@ function lf_where(array $g, bool $isTop): array {
 
   // Free-text search across the main text columns.
   if (!empty($g['q']) && !is_array($g['q'])) {
-    $cols = ['boat_name', 'boat_owner', 'origin', 'plate_number', 'broker', 'species', 'fishing_ground', 'remarks'];
+    $cols = ['boat_name', 'boat_owner', 'origin', 'plate_number', 'broker', 'species', 'status', 'remarks'];
     $w[] = '(' . implode(' OR ', array_map(fn($c) => "$c LIKE ?", $cols)) . ')';
     $like = '%' . addcslashes((string)$g['q'], '%_\\') . '%';
     foreach ($cols as $_) $p[] = $like;

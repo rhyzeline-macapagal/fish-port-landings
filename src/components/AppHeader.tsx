@@ -11,6 +11,7 @@ function getPageLabel(pathname: string) {
   if (pathname === "/landings") return "Fish Landings";
   if (pathname === "/parking") return "Parking Collection";
   if (pathname === "/dashboard/tenants") return "FishPort Tenants";
+  if (pathname === "/species") return "Species";
   if (pathname.startsWith("/dashboard/tenants/")) {
     const slug = pathname.split("/").filter(Boolean).at(-1) ?? "";
     return tenantGroupBySlug(slug)?.label ?? "Tenant Records";

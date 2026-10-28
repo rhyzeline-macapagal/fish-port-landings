@@ -12,7 +12,7 @@ const TONES = {
 
 export type KpiTone = keyof typeof TONES;
 
-export function Trend({ current, previous }: { current: number; previous?: number | null }) {
+export function Trend({ current, previous, newActivityLabel = "New activity" }: { current: number; previous?: number | null; newActivityLabel?: string }) {
   if (previous == null) return null;
 
   let kind: "up" | "down" | "flat";
@@ -23,7 +23,7 @@ export function Trend({ current, previous }: { current: number; previous?: numbe
       text = "No change";
     } else {
       kind = "up";
-      text = "New activity";
+      text = newActivityLabel;
     }
   } else {
     const percentage = ((current - previous) / previous) * 100;
@@ -89,7 +89,7 @@ const KpiCard = memo(function KpiCard({
   loading,
   current,
   previous,
-  compareLabel,
+  newActivityLabel,
   spark,
   highlight,
 }: {
@@ -103,6 +103,7 @@ const KpiCard = memo(function KpiCard({
   current?: number;
   previous?: number | null;
   compareLabel?: string;
+  newActivityLabel?: string;
   spark?: number[];
   highlight?: boolean;
 }) {
@@ -134,8 +135,7 @@ const KpiCard = memo(function KpiCard({
         <div className="min-w-0 leading-tight">
           {!loading && current !== undefined && previous != null ? (
             <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
-              <Trend current={current} previous={previous} />
-              {compareLabel && <span className="hidden truncate text-[10px] text-slate-500 sm:inline">{compareLabel}</span>}
+              <Trend current={current} previous={previous} newActivityLabel={newActivityLabel} />
             </div>
           ) : hint ? (
             <p className="truncate text-[10px] text-slate-500">{hint}</p>

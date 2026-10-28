@@ -64,6 +64,8 @@ interface DashboardData {
   by_month: MonthRow[];
   prev: PrevTotals;
   compare_label: string;
+  record_start_date?: string | null;
+  record_end_date?: string | null;
   recent: Landing[];
   year: number;
   month: number;
@@ -333,10 +335,21 @@ export default function DashboardPage() {
     setError("");
     setFetching(true);
     api<DashboardData>(`dashboard.php?year=${year}&month=${month}`)
-      .then((d) => {
+      .then(async (d) => {
         if (ignore) return;
         if (!d.by_route?.land || !d.by_route?.sea || !d.period_days) {
           throw new Error("Dashboard analytics data is unavailable. Please deploy the latest dashboard API.");
+        }
+        if (!d.record_start_date || !d.record_end_date) {
+          const [firstRows, lastRows] = await Promise.all([
+            api<Landing[]>("landings.php?limit=1&sort=landing_date&dir=asc&exclude_rejected=1"),
+            api<Landing[]>("landings.php?limit=1&sort=landing_date&dir=desc&exclude_rejected=1"),
+          ]);
+          d = {
+            ...d,
+            record_start_date: firstRows[0]?.landing_date ?? null,
+            record_end_date: lastRows[0]?.landing_date ?? null,
+          };
         }
         cache.current.set(key, d);
         setData(d);
@@ -432,7 +445,9 @@ export default function DashboardPage() {
         species: Number(data.prev.species_count),
       }
     : null;
-  const compareLabel = data?.compare_label ?? "";
+  const recordCoverageLabel = data?.record_start_date && data.record_end_date
+    ? `${new Intl.DateTimeFormat("en-US", { day: "numeric", month: "short", year: "numeric" }).format(new Date(`${data.record_start_date}T00:00:00`))} to ${new Intl.DateTimeFormat("en-US", { day: "numeric", month: "short", year: "numeric" }).format(new Date(`${data.record_end_date}T00:00:00`))}`
+    : "No records added yet";
   const landRoute: RouteTotals = {
     landings: routeNumber(data?.by_route?.land, "landings"),
     value: routeNumber(data?.by_route?.land, "value"),
@@ -565,7 +580,7 @@ export default function DashboardPage() {
           loading={loading}
           current={cur.landings}
           previous={prev?.landings}
-          compareLabel={compareLabel}
+          newActivityLabel={recordCoverageLabel}
           spark={sparks.landings}
         />
         <KpiCard
@@ -578,7 +593,7 @@ export default function DashboardPage() {
           loading={loading}
           current={cur.value}
           previous={prev?.value}
-          compareLabel={compareLabel}
+          newActivityLabel={recordCoverageLabel}
           spark={sparks.amount}
         />
         {canAdd ? (
@@ -618,7 +633,7 @@ export default function DashboardPage() {
           loading={loading}
           current={cur.species}
           previous={prev?.species}
-          compareLabel={compareLabel}
+          newActivityLabel={recordCoverageLabel}
         />
       </section>
 

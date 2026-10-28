@@ -64,6 +64,7 @@ const TABS = [
   { label: "All", value: "", dot: "" },
   { label: "Pending", value: "pending", dot: "bg-amber-500" },
   { label: "Approved", value: "approved", dot: "bg-emerald-500" },
+  { label: "Rejected", value: "rejected", dot: "bg-red-500" },
 ];
 
 const PERIODS = [
@@ -383,12 +384,14 @@ function Delivery({ truck }: { truck: boolean }) {
 function ReviewActions({
   status,
   onApprove,
+  onReject,
   onEdit,
   onDelete,
   labelled,
 }: {
   status: Landing["status"];
   onApprove?: () => void;
+  onReject?: () => void;
   onEdit?: () => void;
   onDelete?: () => void;
   labelled?: boolean;
@@ -419,6 +422,18 @@ function ReviewActions({
         >
           <Check size={16} />
           {labelled && "Approve"}
+        </button>
+      )}
+      {onReject && status !== "rejected" && (
+        <button
+          type="button"
+          onClick={onReject}
+          title="Reject"
+          aria-label="Reject landing"
+          className={`${base} bg-amber-50 text-amber-700 hover:bg-amber-100`}
+        >
+          <X size={15} />
+          {labelled && "Reject"}
         </button>
       )}
       {onDelete && (
@@ -467,7 +482,7 @@ function compareBy(key: SortKey, dir: "asc" | "desc") {
 function filterCardRows(list: Landing[], f: RecordCardFilters) {
   const q = f.search.trim().toLowerCase();
   const filtered = list.filter((r) => {
-    const matchesSearch = !q || [r.boat_name, r.boat_owner, r.broker, r.species, r.origin, r.plate_number, r.fishing_gear]
+    const matchesSearch = !q || [r.boat_name, r.boat_owner, r.broker, r.species, r.origin, r.plate_number, r.fishing_gear, r.status]
       .some((v) => String(v ?? "").toLowerCase().includes(q));
     const matchesRoute = !f.route || (f.route === "land") === (Number(r.truck_delivery) === 1);
     return matchesSearch && matchesRoute
@@ -614,7 +629,7 @@ function filtersFromUrl(): Filters {
   const year = p.get("year");
   return {
     ...EMPTY,
-    status: ["pending", "approved"].includes(status) ? status : "",
+    status: ["pending", "approved", "rejected"].includes(status) ? status : "",
     year: year !== null && /^\d{4}$/.test(year) ? year : EMPTY.year,
   };
 }
@@ -669,6 +684,8 @@ export default function LandingsPage() {
   // Delete (admin only)
   const [deleting, setDeleting] = useState<Landing | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
+  const [rejecting, setRejecting] = useState<Landing | null>(null);
+  const [rejectBusy, setRejectBusy] = useState(false);
 
   // Export for the records list: a route, and optionally a single supplier or owner
   const [gxOpen, setGxOpen] = useState(false);
@@ -719,13 +736,13 @@ export default function LandingsPage() {
       params.from = range.from;
       params.to = range.to;
       params.summary = "1";
-      if (!f.status) params.exclude_rejected = "1";
+      if (!f.status && !isAdmin) params.exclude_rejected = "1";
       const summary = await api<LandingSummary | Landing[]>(`landings.php?${new URLSearchParams(params).toString()}`);
       if (id !== prevReq.current) return;
       // Keep the frontend compatible while an older hosted PHP API is being
       // replaced: old versions ignore ?summary=1 and return a row array.
       const stats = Array.isArray(summary)
-        ? summarize(summary, !f.status)
+        ? summarize(summary, !f.status && !isAdmin)
         : normalizedSummary(summary);
       setPrev({ label: range.label, stats });
     } catch {
@@ -757,10 +774,10 @@ export default function LandingsPage() {
       }
       const params: Record<string, string> = Object.fromEntries(buildQs(f));
       params.summary = "1";
-      if (!f.status) params.exclude_rejected = "1";
+      if (!f.status && !isAdmin) params.exclude_rejected = "1";
       const res = await api<LandingSummary | Landing[]>(`landings.php?${new URLSearchParams(params).toString()}`);
       if (id !== totalsReq.current) return;
-      setTotals(Array.isArray(res) ? summarize(res, !f.status) : normalizedSummary(res));
+      setTotals(Array.isArray(res) ? summarize(res, !f.status && !isAdmin) : normalizedSummary(res));
     } catch {
       if (id === totalsReq.current) setTotals(null);
     }
@@ -1034,7 +1051,7 @@ export default function LandingsPage() {
     }
     try {
       const params: Record<string, string> = Object.fromEntries(buildQs(f));
-      if (!f.status) params.exclude_rejected = "1";
+      if (!f.status && !isAdmin) params.exclude_rejected = "1";
       const all = await fetchAllLandings(params, controller.signal);
       if (id !== listReq.current) return;
       // Guard against a row appearing on two pages
@@ -1102,6 +1119,13 @@ export default function LandingsPage() {
     return () => window.removeEventListener("keydown", onKey);
   }, [deleting, deleteBusy]);
 
+  useEffect(() => {
+    if (!rejecting) return;
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && !rejectBusy && setRejecting(null);
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [rejecting, rejectBusy]);
+
   // Close the records export dialog with Esc
   useEffect(() => {
     if (!gxOpen) return;
@@ -1110,15 +1134,28 @@ export default function LandingsPage() {
     return () => window.removeEventListener("keydown", onKey);
   }, [gxOpen, gxBusy]);
 
-  async function approve(r: Landing) {
+  async function review(r: Landing, status: "approved" | "rejected") {
     try {
       await api("landing_review.php", {
         method: "POST",
-        body: JSON.stringify(r.trip_id ? { trip_id: r.trip_id, status: "approved" } : { id: r.id, status: "approved" }),
+        body: JSON.stringify(r.trip_id ? { trip_id: r.trip_id, status } : { id: r.id, status }),
       });
       load();
+      return true;
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Could not update the landing.");
+      setError(e instanceof Error ? e.message : `Could not ${status} the landing.`);
+      return false;
+    }
+  }
+
+  async function confirmReject() {
+    if (!rejecting) return;
+    setRejectBusy(true);
+    setError("");
+    try {
+      if (await review(rejecting, "rejected")) setRejecting(null);
+    } finally {
+      setRejectBusy(false);
     }
   }
 
@@ -1242,7 +1279,7 @@ export default function LandingsPage() {
   const pendingValue = pending.value;
 
   // Same rule as the dashboard: rejected entries are not counted unless the Rejected tab is chosen.
-  const skipRejected = applied.status === "";
+  const skipRejected = applied.status === "" && !isAdmin;
   const countable = useMemo(
     () => skipRejected ? rows.filter((r) => r.status !== "rejected") : rows,
     [rows, skipRejected],
@@ -1800,7 +1837,7 @@ export default function LandingsPage() {
                 onSearch={(search) => updateCardFilters({ search })}
               />
               <select aria-label="Status filter" className={inputCls} value={cardFilters.status} onChange={(e) => updateCardFilters({ status: e.target.value })}>
-                <option value="">All statuses</option><option value="pending">Pending</option><option value="approved">Approved</option>
+                <option value="">All statuses</option><option value="pending">Pending</option><option value="approved">Approved</option><option value="rejected">Rejected</option>
               </select>
               <select aria-label="Species filter" className={inputCls} value={cardFilters.species} onChange={(e) => updateCardFilters({ species: e.target.value })}>
                 <option value="">All species</option>{selectOptions(options.species)}
@@ -1854,7 +1891,7 @@ export default function LandingsPage() {
                         <div><p className="text-xs text-slate-500">Registered owner</p><p className="break-words font-medium">{val(r.boat_owner)}</p></div>
                         <div><p className="text-xs text-slate-500">Fishing gear</p><p className="break-words font-medium">{val(r.fishing_gear)}</p></div>
                       </div>}
-                      {canEdit && <ReviewActions status={r.status} onEdit={() => setEditing(r)} onApprove={isAdmin ? () => approve(r) : undefined} onDelete={isAdmin ? () => setDeleting(r) : undefined} labelled />}
+                      {canEdit && <ReviewActions status={r.status} onEdit={() => setEditing(r)} onApprove={isAdmin ? () => review(r, "approved") : undefined} onReject={isAdmin ? () => setRejecting(r) : undefined} onDelete={isAdmin ? () => setDeleting(r) : undefined} labelled />}
                     </li>
                     );
                   })}
@@ -1895,7 +1932,8 @@ export default function LandingsPage() {
                               <ReviewActions
                                 status={r.status}
                                 onEdit={() => setEditing(r)}
-                                onApprove={isAdmin ? () => approve(r) : undefined}
+                                onApprove={isAdmin ? () => review(r, "approved") : undefined}
+                                onReject={isAdmin ? () => setRejecting(r) : undefined}
                                 onDelete={isAdmin ? () => setDeleting(r) : undefined}
                               />
                             </td>
@@ -2186,6 +2224,63 @@ export default function LandingsPage() {
               >
                 {gxBusy === "pdf" ? <Loader2 size={16} className="animate-spin" /> : <FileText size={16} />}
                 PDF
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Reject confirmation */}
+      {rejecting && (
+        <div
+          className="fixed inset-0 z-50 grid place-items-center bg-slate-900/50 p-4"
+          onClick={() => !rejectBusy && setRejecting(null)}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="reject-title"
+            className={`${card} w-full max-w-md p-6 shadow-xl`}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start gap-4">
+              <div className="grid h-10 w-10 shrink-0 place-items-center rounded-md bg-amber-50 text-amber-700">
+                <X size={20} />
+              </div>
+              <div className="min-w-0">
+                <h2 id="reject-title" className="text-lg font-semibold text-slate-900">
+                  Are you sure you want to delete this record?
+                </h2>
+                <p className="mt-1 text-sm text-slate-600">
+                  This will reject the landing and keep it available in the Rejected tab. It will not be deleted.
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-5 grid grid-cols-2 gap-3 rounded-md bg-slate-50 p-3 text-sm">
+              <div className="min-w-0">
+                <p className="text-xs text-slate-600">Supplier</p>
+                <p className="break-words font-semibold text-slate-900">{rejecting.boat_name}</p>
+              </div>
+              <div>
+                <p className="text-xs text-slate-600">Date</p>
+                <p className="font-semibold text-slate-900">{formatDate(rejecting.landing_date)}</p>
+              </div>
+            </div>
+
+            <div className="mt-6 flex justify-end gap-3">
+              <button type="button" onClick={() => setRejecting(null)} disabled={rejectBusy} className={ghostBtn}>
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={confirmReject}
+                disabled={rejectBusy}
+                autoFocus
+                className="inline-flex items-center gap-2 rounded-md bg-amber-600 px-5 py-2.5 text-sm font-medium text-white transition-colors hover:bg-amber-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/50 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {rejectBusy ? <Loader2 size={16} className="animate-spin" /> : <X size={16} />}
+                {rejectBusy ? "Rejecting..." : "Reject"}
               </button>
             </div>
           </div>
