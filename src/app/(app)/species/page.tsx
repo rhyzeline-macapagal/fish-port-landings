@@ -8,11 +8,14 @@ import { inputCls } from "@/components/ui";
 type SpeciesRecord = {
   id?: number | string;
   local_name: string | null;
+  other_names: string | null;
   common_name: string | null;
   scientific_name: string | null;
+  notes: string | null;
 };
 
 type SpeciesResponse = SpeciesRecord[] | { species?: SpeciesRecord[]; records?: SpeciesRecord[] };
+type SpeciesLookupResponse = { names?: string[] };
 
 const card = "surface-glass rounded-xl border border-slate-200";
 const text = (value: string | null | undefined) => value?.trim() || "-";
@@ -20,6 +23,20 @@ const text = (value: string | null | undefined) => value?.trim() || "-";
 function recordsFromResponse(response: SpeciesResponse): SpeciesRecord[] {
   if (Array.isArray(response)) return response;
   return response.species ?? response.records ?? [];
+}
+
+function loadSpecies(signal: AbortSignal) {
+  return api<SpeciesResponse>("species.php", { signal }).catch(() =>
+    api<SpeciesLookupResponse>("lookups.php?type=species", { signal }).then((response) =>
+      (response.names ?? []).map((name) => ({
+        local_name: name,
+        other_names: null,
+        common_name: null,
+        scientific_name: null,
+        notes: null,
+      }))
+    )
+  );
 }
 
 export default function SpeciesPage() {
@@ -31,8 +48,8 @@ export default function SpeciesPage() {
 
   useEffect(() => {
     const controller = new AbortController();
-    api<SpeciesResponse>("species.php", { signal: controller.signal })
-      .then((response) => setRecords(recordsFromResponse(response)))
+    loadSpecies(controller.signal)
+      .then((response) => setRecords(Array.isArray(response) ? response : recordsFromResponse(response)))
       .catch((cause) => {
         if (cause instanceof DOMException && cause.name === "AbortError") return;
         setError(cause instanceof Error ? cause.message : "Could not load species.");
@@ -46,7 +63,7 @@ export default function SpeciesPage() {
   const filtered = useMemo(() => {
     const query = search.trim().toLowerCase();
     if (!query) return records;
-    return records.filter((record) => [record.local_name, record.common_name, record.scientific_name]
+    return records.filter((record) => [record.local_name, record.other_names, record.common_name, record.scientific_name, record.notes]
       .some((value) => text(value).toLowerCase().includes(query)));
   }, [records, search]);
 
@@ -88,12 +105,14 @@ export default function SpeciesPage() {
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[720px] text-left text-sm">
+            <table className="w-full min-w-[920px] text-left text-sm">
               <thead className="bg-slate-50/80 text-xs uppercase tracking-wide text-slate-500">
                 <tr>
                   <th className="px-5 py-3 font-semibold">Local name</th>
+                  <th className="px-4 py-3 font-semibold">Other names</th>
                   <th className="px-4 py-3 font-semibold">Common name</th>
                   <th className="px-4 py-3 font-semibold">Scientific name</th>
+                  <th className="px-4 py-3 font-semibold">Notes</th>
                   <th className="px-5 py-3 text-right font-semibold">Action</th>
                 </tr>
               </thead>
@@ -101,8 +120,10 @@ export default function SpeciesPage() {
                 {filtered.map((record, index) => (
                   <tr key={String(record.id ?? `${record.local_name}-${record.common_name}-${index}`)} className="hover:bg-slate-50/70">
                     <td className="px-5 py-3.5 font-medium text-[#14263d]">{text(record.local_name)}</td>
+                    <td className="px-4 py-3.5 text-slate-700">{text(record.other_names)}</td>
                     <td className="px-4 py-3.5 text-slate-700">{text(record.common_name)}</td>
                     <td className="px-4 py-3.5 italic text-slate-600">{text(record.scientific_name)}</td>
+                    <td className="px-4 py-3.5 text-slate-600">{text(record.notes)}</td>
                     <td className="px-5 py-3.5 text-right">
                       <button type="button" onClick={() => setSelected(record)} className="inline-flex items-center gap-1.5 rounded-md bg-sky-50 px-3 py-2 text-xs font-semibold text-[#0875d1] hover:bg-sky-100" title="View species">
                         <Eye size={14} /> View
@@ -125,8 +146,10 @@ export default function SpeciesPage() {
             </div>
             <dl className="mt-5 divide-y divide-slate-100 rounded-lg bg-slate-50 px-4">
               <div className="py-3"><dt className="text-xs text-slate-500">Local name</dt><dd className="mt-1 font-medium text-slate-900">{text(selected.local_name)}</dd></div>
+              <div className="py-3"><dt className="text-xs text-slate-500">Other names</dt><dd className="mt-1 font-medium text-slate-900">{text(selected.other_names)}</dd></div>
               <div className="py-3"><dt className="text-xs text-slate-500">Common name</dt><dd className="mt-1 font-medium text-slate-900">{text(selected.common_name)}</dd></div>
               <div className="py-3"><dt className="text-xs text-slate-500">Scientific name</dt><dd className="mt-1 font-medium italic text-slate-900">{text(selected.scientific_name)}</dd></div>
+              <div className="py-3"><dt className="text-xs text-slate-500">Notes</dt><dd className="mt-1 font-medium text-slate-900">{text(selected.notes)}</dd></div>
             </dl>
           </div>
         </div>

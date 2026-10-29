@@ -39,7 +39,7 @@ function lf_where(array $g, bool $isTop): array {
     'origin'         => 'origin',
     'plate_number'   => 'plate_number', 'plate' => 'plate_number',
     'fishing_gear'   => 'fishing_gear', 'gear'  => 'fishing_gear',
-    'fishing_ground' => 'fishing_ground', 'ground' => 'fishing_ground',
+    'species_id'     => 'species_id',
     'quality'        => 'quality',
     'unit'           => 'unit',
     'trip_id'        => 'trip_id',
@@ -132,7 +132,7 @@ function lf_where(array $g, bool $isTop): array {
  *  List (plain array of rows, one row per species).
  *    Each row also has trip_id and trip_items (how many species rows its trip has).
  *    filters : status species vessel|boat_name owner|boat_owner broker origin
- *              plate|plate_number gear|fishing_gear ground|fishing_ground quality unit
+ *              plate|plate_number gear|fishing_gear species_id quality unit
  *              trip_id created_by reviewed_by   (comma list or x[]=.. = match any)
  *              delivery=land|sea  reviewed=yes|no
  *              period=today|yesterday|week|month|year  year=2026  from  to
@@ -144,12 +144,12 @@ function lf_where(array $g, bool $isTop): array {
  *    paging  : limit (max 5000)  offset
  *
  *  Leaderboard
- *    ?top=broker|vessel|owner|species|origin|plate|gear|ground|quality|status|date|delivery
+ *    ?top=broker|vessel|owner|species|origin|plate|gear|species_id|quality|status|date|delivery
  *    &by=value|volume|trips|price   &n=10   (+ any filter above)
  *    "trips" counts distinct trips, not species rows.
  *
  *  Breakdown: totals for any mix of fields (+ any filter above)
- *    ?group=origin,species   (up to 5 of: producer owner origin plate species broker gear ground
+ *    ?group=origin,species   (up to 5 of: producer owner origin plate species species_id broker gear
  *                             quality status delivery month date)
  *    &by=value|volume|trips|price|name   &n=50
  *
@@ -170,7 +170,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET') {
       'vessels'  => 'boat_name',     'owners'   => 'boat_owner',
       'brokers'  => 'broker',        'origins'  => 'origin',
       'plates'   => 'plate_number',
-      'gears'    => 'fishing_gear',  'grounds'  => 'fishing_ground',
+      'gears'    => 'fishing_gear',  'species_ids' => 'species_id',
       'qualities'=> 'quality',       'units'    => 'unit',
     ];
     $out = [];
@@ -226,7 +226,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET') {
       'origin'   => 'origin',
       'plate'    => 'plate_number',
       'gear'     => 'fishing_gear',
-      'ground'   => 'fishing_ground',
+      'species_id' => 'species_id',
       'quality'  => 'quality',
       'status'   => 'status',
       'date'     => 'landing_date',
@@ -289,7 +289,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET') {
       'species'  => 'species',
       'broker'   => 'broker',
       'gear'     => 'fishing_gear',
-      'ground'   => 'fishing_ground',
+      'species_id' => 'species_id',
       'quality'  => 'quality',
       'status'   => 'status',
       'delivery' => "CASE WHEN truck_delivery = 1 THEN 'Land' ELSE 'Sea' END",
@@ -434,6 +434,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
   $rawItems = (isset($b['items']) && is_array($b['items']) && $b['items'])
     ? $b['items']
     : [[
+      'species_id'   => $b['species_id'] ?? null,
         'species'      => $b['species'] ?? '',
         'volume'       => $b['volume'] ?? '',
         'unit'         => $b['unit'] ?? 'kg',
@@ -464,6 +465,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $price = (isset($it['price_per_kg']) && $it['price_per_kg'] !== '') ? $it['price_per_kg'] : null;
 
     $items[] = [
+      'species_id'   => (isset($it['species_id']) && $it['species_id'] !== '') ? $it['species_id'] : null,
       'species'      => $species,
       'volume'       => $it['volume'],
       'unit'         => $unit,
@@ -490,9 +492,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $st = $pdo->prepare(
       'INSERT INTO fp_landings
        (trip_id, landing_date, landing_time, boat_name, fishing_gear, origin, truck_delivery, plate_number,
-        boat_owner, species, volume, unit, price_per_kg, total_value, broker, quality,
+        boat_owner, species_id, species, volume, unit, price_per_kg, total_value, broker, quality,
         remarks, created_by)
-             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
+             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
     );
     foreach ($items as $k => $it) {
       $st->execute([
@@ -505,6 +507,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $isLand ? 1 : 0,
         $plate,
         $b['boat_owner'] ?? null,
+        $it['species_id'],
         $it['species'],
         $it['volume'],
         $it['unit'],
