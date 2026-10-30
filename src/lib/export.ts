@@ -11,7 +11,7 @@ export type ExportTable = {
 };
 export type Report = { title: string; subtitle?: string; tables: ExportTable[] };
 
-const ORG_NAME = "Mercedes Municipal Fish Port";
+const ORG_NAME = "Mercedes Municipal FishPort Management Office";
 // Files in the public/ folder. The first one that exists is used.
 const LOGO_CANDIDATES = [
   "/logo.png",
@@ -330,11 +330,18 @@ export async function exportPdf(filename: string, report: Report, opts: { landsc
       foot: t.totals ? [t.columns.map((c, i) => fmtText(t.totals![i], c.format))] : undefined,
       showFoot: "lastPage",
       theme: "striped",
-      styles: { fontSize: t.columns.length > 9 ? 7 : 9, cellPadding: 4, textColor: [30, 41, 59] },
+      styles: { fontSize: t.columns.length > 9 ? 7 : 9, cellPadding: 4, textColor: [0, 0, 0] },
+      bodyStyles: { valign: "middle" },
       headStyles: { fillColor: [18, 64, 92], textColor: 255, fontStyle: "bold" },
       alternateRowStyles: { fillColor: [248, 250, 252] },
       footStyles: { fillColor: [232, 238, 244], textColor: [15, 42, 61], fontStyle: "bold" },
       columnStyles,
+      didParseCell: (hook) => {
+        const column = t.columns[hook.column.index];
+        if (column && (hook.section === "body" || hook.section === "foot" || hook.section === "head")) {
+          hook.cell.styles.halign = isNumeric(column.format) ? "right" : "left";
+        }
+      },
     });
 
     y = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 26;

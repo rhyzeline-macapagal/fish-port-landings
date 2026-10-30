@@ -146,6 +146,7 @@ function Combobox({
   required,
   drop = "up",
   dropdownClassName = "",
+  allowNew = true,
 }: {
   id: string;
   value: string;
@@ -156,6 +157,7 @@ function Combobox({
   required?: boolean;
   drop?: "up" | "down";
   dropdownClassName?: string;
+  allowNew?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(-1);
@@ -181,7 +183,7 @@ function Combobox({
   const exact = options.some((option) => (isSpeciesOption(option) ? option.localName : option).toLowerCase() === q);
   const items = [
     ...matches.map((option) => ({ option, isNew: false })),
-    ...(typed && !exact ? [{ option: typed, isNew: true }] : []),
+    ...(allowNew && typed && !exact ? [{ option: typed, isNew: true }] : []),
   ];
 
   function pick(v: string) {
@@ -666,6 +668,7 @@ export default function NewLandingModal({ onClose, onSaved }: { onClose: () => v
                         onChange={(v) => updateItem(i, { species: v })}
                         options={speciesOptions}
                         dropdownClassName="min-w-[34rem] w-[min(48rem,calc(100vw-2rem))]"
+                        allowNew={false}
                         placeholder="Choose or type a species"
                         emptyText="No species saved yet. Type a name to add one."
                       />

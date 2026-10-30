@@ -77,6 +77,12 @@ interface DashboardData {
   period_days: number | string;
 }
 
+type SpeciesReference = {
+  local_name: string | null;
+  other_names: string | null;
+  common_name: string | null;
+  scientific_name: string | null;
+};
 type SpeciesRow = { name: string; volume: number };
 type MonthPoint = { label: string; full: string; volume: number; landings: number; amount: number };
 type SpeciesSlice = SpeciesRow & { percentage: number; color: string };
@@ -238,20 +244,31 @@ const MonthlyBars = memo(function MonthlyBars({
   );
 });
 
-function SpeciesBar({ name, volume, pct, rank }: { name: string; volume?: number; pct: number; rank?: number }) {
+function SpeciesBar({ name, volume, pct, rank, reference }: { name: string; volume?: number; pct: number; rank?: number; reference?: SpeciesReference }) {
   return (
-    <li>
-      <div className="flex items-center justify-between gap-3 text-sm">
-        <span className="flex min-w-0 items-center gap-2 text-slate-800">
-          {rank !== undefined && <span className="w-5 shrink-0 text-xs tabular-nums text-slate-500">{rank}</span>}
-          <span className="truncate font-medium">{name}</span>
-        </span>
-        <span className="shrink-0 tabular-nums text-slate-600">
-          {volume !== undefined && <span className="mr-3">{Math.round(volume).toLocaleString()} kg</span>}
-          <span className="inline-block w-12 text-right font-semibold text-slate-900">{pct.toFixed(1)}%</span>
-        </span>
+    <li className="grid gap-3 border-b border-slate-100 px-5 py-4 last:border-b-0 lg:grid-cols-[2rem_minmax(11rem,1.15fr)_minmax(10rem,1fr)_minmax(10rem,1fr)_minmax(11rem,1fr)_8rem] lg:items-start lg:gap-4">
+      <span className="pt-0.5 text-xs tabular-nums text-slate-400">{rank}</span>
+      <div className="min-w-0">
+        <p className="break-words text-sm font-semibold text-[#14263d]">{reference?.local_name || name}</p>
+        <span className="mt-1 block text-[10px] font-medium uppercase tracking-wide text-slate-400 lg:hidden">Local name</span>
       </div>
-      <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-slate-100">
+      <div className="min-w-0">
+        <span className="block text-[10px] font-medium uppercase tracking-wide text-slate-400 lg:hidden">Other names</span>
+        <p className="break-words text-xs text-slate-700">{reference?.other_names || "-"}</p>
+      </div>
+      <div className="min-w-0">
+        <span className="block text-[10px] font-medium uppercase tracking-wide text-slate-400 lg:hidden">Common name</span>
+        <p className="break-words text-xs text-slate-700">{reference?.common_name || "-"}</p>
+      </div>
+      <div className="min-w-0">
+        <span className="block text-[10px] font-medium uppercase tracking-wide text-slate-400 lg:hidden">Scientific name</span>
+        <p className="break-words text-xs italic text-slate-700">{reference?.scientific_name || "-"}</p>
+      </div>
+      <div className="flex items-center justify-between gap-3 border-t border-slate-100 pt-2 text-xs tabular-nums lg:block lg:border-t-0 lg:pt-0 lg:text-right">
+        <span className="font-semibold text-[#14263d]">{volume !== undefined ? `${Math.round(volume).toLocaleString()} kg` : "-"}</span>
+        <span className="ml-3 text-slate-500 lg:mt-1 lg:ml-0 lg:block">{pct.toFixed(1)}%</span>
+      </div>
+      <div className="col-span-full h-1.5 overflow-hidden rounded-full bg-slate-100">
         <div className="h-full rounded-full bg-sky-500" style={{ width: `${pct}%` }} />
       </div>
     </li>
@@ -311,6 +328,7 @@ export default function DashboardPage() {
   const [month, setMonth] = useState("0"); // "0" = all months
   const [years, setYears] = useState<number[]>([]);
   const [showAllSpecies, setShowAllSpecies] = useState(false);
+  const [speciesReferences, setSpeciesReferences] = useState<SpeciesReference[]>([]);
 
   // Cache responses per year+month. Cleared whenever a landing is added/edited (version changes).
   const cache = useRef(new Map<string, DashboardData>());
@@ -360,6 +378,16 @@ export default function DashboardPage() {
     return () => { ignore = true; };
   }, [version, year, month]);
 
+  useEffect(() => {
+    const controller = new AbortController();
+    api<SpeciesReference[]>("species.php", { signal: controller.signal })
+      .then(setSpeciesReferences)
+      .catch(() => {
+        if (!controller.signal.aborted) setSpeciesReferences([]);
+      });
+    return () => controller.abort();
+  }, []);
+
   // Close the species popup with Esc
   useEffect(() => {
     if (!showAllSpecies) return;
@@ -382,6 +410,13 @@ export default function DashboardPage() {
     () => (data?.by_species ?? []).map((s) => ({ name: s.species, volume: Number(s.volume) })),
     [data]
   );
+  const speciesReferenceByName = useMemo(() => {
+    const references = new Map<string, SpeciesReference>();
+    speciesReferences.forEach((reference) => {
+      if (reference.local_name?.trim()) references.set(reference.local_name.trim().toLocaleLowerCase(), reference);
+    });
+    return references;
+  }, [speciesReferences]);
   const speciesTotal = useMemo(() => species.reduce((sum, s) => sum + s.volume, 0), [species]);
   const speciesSlices = useMemo<SpeciesSlice[]>(() => {
     if (!speciesTotal) return [];
@@ -469,7 +504,7 @@ export default function DashboardPage() {
     const { exportPdf, exportXlsx, stamp } = await import("@/lib/export");
     const pct = (v: number) => (speciesTotal ? (v / speciesTotal) * 100 : 0);
     const report: Report = {
-      title: `FishPort Statistics - Dashboard ${periodLabel}`,
+      title: `Mercedes Municipal FishPort Management Office - Dashboard ${periodLabel}`,
       subtitle: `Period: ${periodLabel}  |  Exported ${stamp()}`,
       tables: [
         {
@@ -493,6 +528,40 @@ export default function DashboardPage() {
           ],
           rows: species.map((s) => [s.name, s.volume, pct(s.volume)]),
           totals: ["Total", speciesTotal, species.length ? 100 : 0],
+        },
+        {
+          name: "Land vs Sea distribution",
+          columns: [
+            { header: "Measure" },
+            { header: "Land" },
+            { header: "Sea" },
+            { header: "Combined" },
+          ],
+          rows: [
+            ["Total landings", landRoute.landings.toLocaleString(), seaRoute.landings.toLocaleString(), (landRoute.landings + seaRoute.landings).toLocaleString()],
+            ["Total landing value", formatSummaryPeso(landRoute.value), formatSummaryPeso(seaRoute.value), formatSummaryPeso(landRoute.value + seaRoute.value)],
+            ["Total weight", formatKg(landRoute.weight), formatKg(seaRoute.weight), formatKg(landRoute.weight + seaRoute.weight)],
+          ],
+        },
+        {
+          name: "Average daily landing value",
+          columns: [
+            { header: "Measure" },
+            { header: "Combined", format: "money" },
+            { header: "Land", format: "money" },
+            { header: "Sea", format: "money" },
+          ],
+          rows: [["Average daily value", averageDaily(landRoute.value + seaRoute.value), averageDaily(landRoute.value), averageDaily(seaRoute.value)]],
+        },
+        {
+          name: `Monthly landing volume ${year}`,
+          columns: [
+            { header: "Month" },
+            { header: "Landings", format: "int" },
+            { header: "Volume (kg)", format: "decimal" },
+            { header: "Landing value", format: "money" },
+          ],
+          rows: monthly.map((row) => [row.full, row.landings, row.volume, row.amount]),
         },
         {
           name: "Recent landings",
@@ -841,15 +910,17 @@ export default function DashboardPage() {
             role="dialog"
             aria-modal="true"
             aria-label={`All species in ${periodLabel}`}
-            className={`${card} flex max-h-[85vh] w-full max-w-lg flex-col shadow-xl`}
+            className={`${card} flex max-h-[90vh] w-full max-w-6xl flex-col overflow-hidden shadow-2xl`}
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="flex items-start justify-between gap-3 border-b border-slate-200 px-6 py-5">
+            <div className="flex items-start justify-between gap-4 border-b border-slate-200 bg-white px-5 py-5 sm:px-7">
               <div>
-                <h2 className="font-semibold text-slate-900">All species in {periodLabel}</h2>
-                <p className="mt-0.5 text-sm text-slate-600">
-                  {species.length} species, {Math.round(speciesTotal).toLocaleString()} kg total
-                </p>
+                <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#0875d1]">Species breakdown</p>
+                <h2 className="mt-1 text-lg font-semibold text-slate-900">All species in {periodLabel}</h2>
+                <div className="mt-2 flex flex-wrap gap-2 text-xs text-slate-500">
+                  <span className="rounded-full bg-slate-100 px-2.5 py-1">{species.length} species</span>
+                  <span className="rounded-full bg-slate-100 px-2.5 py-1">{Math.round(speciesTotal).toLocaleString()} kg total</span>
+                </div>
               </div>
               <button
                 onClick={() => setShowAllSpecies(false)}
@@ -860,7 +931,10 @@ export default function DashboardPage() {
               </button>
             </div>
 
-            <ul className="space-y-4 overflow-y-auto px-6 py-5">
+            <div className="hidden border-b border-slate-200 bg-slate-50 px-5 py-2.5 text-[10px] font-semibold uppercase tracking-wide text-slate-500 lg:grid lg:grid-cols-[2rem_minmax(11rem,1.15fr)_minmax(10rem,1fr)_minmax(10rem,1fr)_minmax(11rem,1fr)_8rem] lg:gap-4">
+              <span>#</span><span>Local name</span><span>Other names</span><span>Common name</span><span>Scientific name</span><span className="text-right">Volume / share</span>
+            </div>
+            <ul className="overflow-y-auto">
               {species.map((s, i) => (
                 <SpeciesBar
                   key={s.name}
@@ -868,6 +942,7 @@ export default function DashboardPage() {
                   volume={s.volume}
                   pct={speciesTotal ? (s.volume / speciesTotal) * 100 : 0}
                   rank={i + 1}
+                  reference={speciesReferenceByName.get(s.name.trim().toLocaleLowerCase())}
                 />
               ))}
             </ul>

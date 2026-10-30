@@ -40,7 +40,7 @@ function Logo({ compact = false }: { compact?: boolean }) {
         compact ? "justify-center" : "gap-3"
       }`}
     >
-      <span className="relative h-11 w-11 shrink-0 overflow-hidden rounded-xl ring-1 ring-white/25 shadow-[0_5px_18px_rgba(1,16,29,0.28)]">
+      <span className="relative h-11 w-11 shrink-0 overflow-hidden rounded-xl">
         <Image src="/logo.png" alt="" fill sizes="44px" priority className="object-cover" />
       </span>
       {!compact && (
