@@ -29,6 +29,18 @@ export function canonical(typed: string, options: string[]) {
   return options.find((o) => o.toLowerCase() === t.toLowerCase()) ?? t;
 }
 
+type SpeciesOption = {
+  localName: string;
+  otherNames: string;
+  commonName: string;
+};
+
+type SpeciesRecord = {
+  local_name: string | null;
+  other_names: string | null;
+  common_name: string | null;
+};
+
 function Field({
   label,
   htmlFor,
@@ -133,15 +145,17 @@ function Combobox({
   emptyText,
   required,
   drop = "up",
+  dropdownClassName = "",
 }: {
   id: string;
   value: string;
   onChange: (v: string) => void;
-  options: string[];
+  options: (string | SpeciesOption)[];
   placeholder?: string;
   emptyText: string;
   required?: boolean;
   drop?: "up" | "down";
+  dropdownClassName?: string;
 }) {
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(-1);
@@ -157,11 +171,17 @@ function Combobox({
 
   const typed = value.trim();
   const q = typed.toLowerCase();
-  const matches = options.filter((o) => o.toLowerCase().includes(q));
-  const exact = options.some((o) => o.toLowerCase() === q);
+  const isSpeciesOption = (option: string | SpeciesOption): option is SpeciesOption => typeof option !== "string";
+  const matches = options.filter((option) => {
+    const searchText = isSpeciesOption(option)
+      ? `${option.localName} ${option.otherNames} ${option.commonName}`
+      : option;
+    return searchText.toLowerCase().includes(q);
+  });
+  const exact = options.some((option) => (isSpeciesOption(option) ? option.localName : option).toLowerCase() === q);
   const items = [
-    ...matches.map((label) => ({ label, isNew: false })),
-    ...(typed && !exact ? [{ label: typed, isNew: true }] : []),
+    ...matches.map((option) => ({ option, isNew: false })),
+    ...(typed && !exact ? [{ option: typed, isNew: true }] : []),
   ];
 
   function pick(v: string) {
@@ -180,7 +200,7 @@ function Combobox({
       setActive((i) => Math.max(i - 1, 0));
     } else if (e.key === "Enter" && open && active >= 0 && items[active]) {
       e.preventDefault();
-      pick(items[active].label);
+      pick(isSpeciesOption(items[active].option) ? items[active].option.localName : items[active].option);
     } else if (e.key === "Escape" && open) {
       e.stopPropagation(); // close the list, not the whole window
       setOpen(false);
@@ -222,19 +242,19 @@ function Combobox({
         <ul
           id={`${id}-options`}
           role="listbox"
-          className={`absolute left-0 right-0 z-30 max-h-52 overflow-y-auto rounded-xl border border-slate-200 bg-white p-1.5 shadow-[0_16px_40px_-12px_rgba(8,30,50,0.35)] ${
+          className={`absolute left-0 right-0 z-30 max-h-52 overflow-y-auto rounded-xl border border-slate-200 bg-white p-1.5 shadow-[0_16px_40px_-12px_rgba(8,30,50,0.35)] ${dropdownClassName} ${
             drop === "up" ? "bottom-full mb-2" : "top-full mt-2"
           }`}
         >
           {items.length === 0 && <li className="px-3 py-2.5 text-sm text-slate-500">{emptyText}</li>}
           {items.map((it, i) => (
             <li
-              key={`${it.label}-${i}`}
+              key={`${isSpeciesOption(it.option) ? it.option.localName : it.option}-${i}`}
               role="option"
               aria-selected={i === active}
               onMouseDown={(e) => {
                 e.preventDefault();
-                pick(it.label);
+                pick(isSpeciesOption(it.option) ? it.option.localName : it.option);
               }}
               onMouseEnter={() => setActive(i)}
               className={`flex cursor-pointer items-center gap-2 rounded-lg px-3 py-2.5 text-[15px] ${
@@ -244,12 +264,20 @@ function Combobox({
               {it.isNew ? (
                 <>
                   <Plus size={15} className="text-sky-600" />
-                  Add &quot;{it.label}&quot;
+                  Add &quot;{it.option}&quot;
                 </>
               ) : (
                 <>
-                  <span className="flex-1">{it.label}</span>
-                  {q === it.label.toLowerCase() && <Check size={15} className="text-sky-600" />}
+                  {isSpeciesOption(it.option) ? (
+                    <span className="grid min-w-0 flex-1 grid-cols-[minmax(9rem,1.1fr)_minmax(9rem,1fr)_minmax(9rem,1fr)] items-center gap-3">
+                      <span className="truncate font-semibold">{it.option.localName}</span>
+                      <span className="truncate text-xs text-slate-500"><span className="mr-1 text-[10px] uppercase tracking-wide text-slate-400">Other</span>{it.option.otherNames || "-"}</span>
+                      <span className="truncate text-xs text-slate-500"><span className="mr-1 text-[10px] uppercase tracking-wide text-slate-400">Common</span>{it.option.commonName || "-"}</span>
+                    </span>
+                  ) : (
+                    <span className="flex-1">{it.option}</span>
+                  )}
+                  {q === (isSpeciesOption(it.option) ? it.option.localName : it.option).toLowerCase() && <Check size={15} className="shrink-0 text-sky-600" />}
                 </>
               )}
             </li>
@@ -323,8 +351,37 @@ export default function NewLandingModal({ onClose, onSaved }: { onClose: () => v
 
   // Dropdown names come only from the database
   const saved = useLookups();
+  const [speciesRecords, setSpeciesRecords] = useState<SpeciesRecord[]>([]);
+  useEffect(() => {
+    const controller = new AbortController();
+    api<SpeciesRecord[]>("species.php", { signal: controller.signal })
+      .then(setSpeciesRecords)
+      .catch(() => {
+        if (!controller.signal.aborted) setSpeciesRecords([]);
+      });
+    return () => controller.abort();
+  }, []);
   const brokerOptions = useMemo(() => mergeOptions([], saved.brokers), [saved.brokers]);
-  const speciesOptions = useMemo(() => mergeOptions([], saved.species), [saved.species]);
+  const speciesOptions = useMemo<SpeciesOption[]>(() => {
+    const records = speciesRecords.length
+      ? speciesRecords
+      : saved.species.map((localName) => ({ local_name: localName, other_names: null, common_name: null }));
+    const seen = new Set<string>();
+    return records
+      .map((record) => ({
+        localName: clean(record.local_name ?? ""),
+        otherNames: clean(record.other_names ?? ""),
+        commonName: clean(record.common_name ?? ""),
+      }))
+      .filter((option) => {
+        const key = option.localName.toLowerCase();
+        if (!key || seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      })
+      .sort((a, b) => a.localName.localeCompare(b.localName, undefined, { numeric: true }));
+  }, [saved.species, speciesRecords]);
+  const speciesNames = useMemo(() => speciesOptions.map((option) => option.localName), [speciesOptions]);
   const producerOptions = useMemo(() => mergeOptions([], saved.producers), [saved.producers]);
   const ownerOptions = useMemo(() => mergeOptions([], saved.owners), [saved.owners]);
 
@@ -371,7 +428,7 @@ export default function NewLandingModal({ onClose, onSaved }: { onClose: () => v
     for (let i = 0; i < items.length; i++) {
       const it = items[i];
       const tag = items.length > 1 ? `Species ${i + 1}: ` : "";
-      const name = canonical(it.species, speciesOptions);
+      const name = canonical(it.species, speciesNames);
       if (!name) return `${tag}Choose a species or type one.`;
       if (seen.has(name.toLowerCase())) return `${name} is listed more than once. Combine them into one line.`;
       seen.add(name.toLowerCase());
@@ -396,7 +453,7 @@ export default function NewLandingModal({ onClose, onSaved }: { onClose: () => v
     const owner = canonical(f.boat_owner, ownerOptions);
     const producer = f.truck_delivery ? "" : canonical(f.boat_name, producerOptions);
     const payloadItems = items.map((it) => ({
-      species: canonical(it.species, speciesOptions),
+      species: canonical(it.species, speciesNames),
       volume: Number(it.volume),
       unit: it.unit,
       price_per_kg: Number(it.price_per_kg),
@@ -608,6 +665,7 @@ export default function NewLandingModal({ onClose, onSaved }: { onClose: () => v
                         value={it.species}
                         onChange={(v) => updateItem(i, { species: v })}
                         options={speciesOptions}
+                        dropdownClassName="min-w-[34rem] w-[min(48rem,calc(100vw-2rem))]"
                         placeholder="Choose or type a species"
                         emptyText="No species saved yet. Type a name to add one."
                       />

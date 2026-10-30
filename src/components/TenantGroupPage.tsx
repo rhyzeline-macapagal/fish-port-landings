@@ -32,6 +32,7 @@ import type { TenantCategory, TenantGroup } from "@/lib/tenant-groups";
 import { useAuth } from "@/context/AuthContext";
 import Modal from "@/components/Modal";
 import AnimatedSelect from "@/components/AnimatedSelect";
+import ExportMenu, { type ExportKind } from "@/components/ExportMenu";
 import { ghostBtn, inputCls, primaryBtn } from "@/components/ui";
 
 type Size = "small" | "big";
@@ -109,7 +110,7 @@ function firstValue(source: Record<string, unknown>, ...keys: string[]) {
   return null;
 }
 
-function normalizeTenant(raw: Tenant): Tenant {
+function normalizeTenant(raw: Tenant, category = raw.category): Tenant {
   const source = raw as unknown as Record<string, unknown>;
   const normalizedKeys = Object.fromEntries(Object.entries(source).map(([key, value]) => [
     key.replace(/([A-Z])/g, "_$1").toLowerCase(),
@@ -118,9 +119,11 @@ function normalizeTenant(raw: Tenant): Tenant {
   const values = { ...source, ...normalizedKeys };
   const applicationStatus = firstValue(values, "application_status", "permit_status", "application_state", "application");
   const status = firstValue(values, "status", "tenant_status")?.toLowerCase();
+  const brokerSize = firstValue(values, "broker_size", "size")?.toLowerCase();
 
   return {
     ...raw,
+    broker_size: category === "fish_broker" ? (brokerSize === "small" ? "small" : "big") : raw.broker_size ?? null,
     permit_number: firstValue(values, "permit_number", "permit_no", "permit_id", "permit") ?? raw.permit_number ?? null,
     application_status: applicationStatus || "—",
     status: status === "inactive" ? "inactive" : "active",
@@ -364,6 +367,7 @@ export default function TenantGroupPage({ group }: { group: TenantGroup }) {
   const deferredSearch = useDeferredValue(search);
   const [applicationFilter, setApplicationFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
+  const [brokerSizeFilter, setBrokerSizeFilter] = useState<Size>("big");
   const [page, setPage] = useState(1);
   const [expanded, setExpanded] = useState<Set<number>>(() => new Set());
 
@@ -383,7 +387,7 @@ export default function TenantGroupPage({ group }: { group: TenantGroup }) {
     api<unknown>(`tenants.php?category=${encodeURIComponent(group.category)}`, { signal: controller.signal })
       .then((payload) => {
         const rows = tenantRows(payload);
-        setTenants(sortTenants(rows.map(normalizeTenant)));
+        setTenants(sortTenants(rows.map((row) => normalizeTenant(row, group.category))));
         setError("");
       })
       .catch((requestError) => {
@@ -409,6 +413,7 @@ export default function TenantGroupPage({ group }: { group: TenantGroup }) {
   const filtered = useMemo(() => {
     const query = deferredSearch.trim().toLocaleLowerCase();
     return tenants.filter((tenant) => {
+      if (showBrokerSize && tenant.broker_size !== brokerSizeFilter) return false;
       if (applicationFilter && tenant.application_status !== applicationFilter) return false;
       if (statusFilter && tenant.status !== statusFilter) return false;
       if (!query) return true;
@@ -428,7 +433,7 @@ export default function TenantGroupPage({ group }: { group: TenantGroup }) {
         tenant.status,
       ].some((value) => String(value ?? "").toLocaleLowerCase().includes(query));
     });
-  }, [applicationFilter, deferredSearch, statusFilter, tenants]);
+  }, [applicationFilter, brokerSizeFilter, deferredSearch, showBrokerSize, statusFilter, tenants]);
 
   const pages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const currentPage = Math.min(page, pages);
@@ -457,6 +462,7 @@ export default function TenantGroupPage({ group }: { group: TenantGroup }) {
     setSearch("");
     setApplicationFilter("");
     setStatusFilter("");
+    if (showBrokerSize) setBrokerSizeFilter("big");
     setPage(1);
   }
 
@@ -523,7 +529,7 @@ export default function TenantGroupPage({ group }: { group: TenantGroup }) {
           stall_no: showStall ? form.stall_no : "",
         }),
       });
-      const normalizedSaved = normalizeTenant(saved);
+      const normalizedSaved = normalizeTenant(saved, group.category);
       setTenants((rows) => sortTenants(editingId ? rows.map((row) => row.id === normalizedSaved.id ? normalizedSaved : row) : [...rows, normalizedSaved]));
       setDialogMode(null);
     } catch (requestError) {
@@ -567,6 +573,51 @@ export default function TenantGroupPage({ group }: { group: TenantGroup }) {
     });
   }
 
+  async function exportTenants(kind: ExportKind) {
+    const { exportPdf, exportXlsx, stamp } = await import("@/lib/export");
+    const report = {
+      title: `${group.label} Tenant Records`,
+      subtitle: `${filtered.length} matching record${filtered.length === 1 ? "" : "s"} | Exported ${stamp()}`,
+      tables: [
+        {
+          name: group.label,
+          columns: [
+            { header: "Permit Number" },
+            { header: "Application Status" },
+            { header: "Last Name" },
+            { header: "First Name" },
+            { header: "Middle Name" },
+            { header: "Business Name" },
+            { header: "Contact Number" },
+            { header: "Stall Number" },
+            { header: "Address" },
+            { header: "Operational Status" },
+            { header: "Remarks" },
+          ],
+          rows: filtered.map((tenant) => {
+            const owner = ownerNameParts(tenant);
+            return [
+              tenant.permit_number,
+              tenant.application_status,
+              owner.lastName,
+              owner.firstName,
+              owner.middleName,
+              tenant.business_name,
+              tenant.contact_number,
+              tenant.stall_no,
+              tenant.address,
+              tenant.status,
+              tenant.remarks,
+            ];
+          }),
+        },
+      ],
+    };
+    const filename = `${group.slug}_tenants_${stamp()}`;
+    if (kind === "xlsx") await exportXlsx(filename, report);
+    else await exportPdf(filename, report, { landscape: true });
+  }
+
   const dialogTitle = dialogMode === "view" ? "Tenant details" : dialogMode === "edit" ? "Edit tenant" : `Add ${group.label}`;
   const viewOnly = dialogMode === "view";
 
@@ -595,15 +646,45 @@ export default function TenantGroupPage({ group }: { group: TenantGroup }) {
               <p className="mt-1 text-sm text-slate-300">Manage permits, ownership, status, and tenant details.</p>
             </div>
           </div>
-          {canEdit && (
-            <button type="button" onClick={openAdd} className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-white px-4 py-2.5 text-sm font-semibold text-[#12344d] shadow-sm transition-colors hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-300 sm:w-auto">
-              <Plus size={16} /> Add Tenant
-            </button>
-          )}
+          <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
+            <ExportMenu
+              variant="glass"
+              title={`Export ${group.label} tenants`}
+              onExport={exportTenants}
+              disabled={loading || tenants.length === 0}
+            />
+            {canEdit && (
+              <button type="button" onClick={openAdd} className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-white px-4 py-2.5 text-sm font-semibold text-[#12344d] shadow-sm transition-colors hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-300 sm:w-auto">
+                <Plus size={16} /> Add Tenant
+              </button>
+            )}
+          </div>
         </div>
       </section>
 
       <section className={`${card} relative z-30 overflow-visible p-4`} aria-label="Tenant filters">
+        {showBrokerSize && (
+          <div className="mb-4 flex border-b border-slate-200" role="tablist" aria-label="Fish broker size">
+            {(["big", "small"] as const).map((size) => {
+              const count = tenants.filter((tenant) => tenant.broker_size === size).length;
+              const active = brokerSizeFilter === size;
+              return (
+                <button
+                  key={size}
+                  type="button"
+                  role="tab"
+                  aria-selected={active}
+                  onClick={() => { setBrokerSizeFilter(size); setPage(1); }}
+                  className={`border-b-2 px-4 py-2.5 text-sm font-semibold capitalize transition-colors ${
+                    active ? "border-[#0875d1] text-[#0875d1]" : "border-transparent text-slate-500 hover:border-slate-300 hover:text-slate-700"
+                  }`}
+                >
+                  {size} <span className="ml-1 text-xs font-medium text-slate-400">{count}</span>
+                </button>
+              );
+            })}
+          </div>
+        )}
         <div className="grid gap-3 md:grid-cols-[minmax(14rem,1fr)_11rem_10rem_auto] md:items-end">
           <label className="block">
             <span className="mb-1.5 block text-xs font-semibold text-slate-600">Search records</span>

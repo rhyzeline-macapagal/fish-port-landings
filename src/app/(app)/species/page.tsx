@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Dna, Eye, Loader2, Search, X } from "lucide-react";
 import { api } from "@/lib/api";
 import { inputCls } from "@/components/ui";
+import ExportMenu, { type ExportKind } from "@/components/ExportMenu";
 
 type SpeciesRecord = {
   id?: number | string;
@@ -67,6 +68,36 @@ export default function SpeciesPage() {
       .some((value) => text(value).toLowerCase().includes(query)));
   }, [records, search]);
 
+  async function exportSpecies(kind: ExportKind) {
+    const { exportPdf, exportXlsx, stamp } = await import("@/lib/export");
+    const report = {
+      title: "Species Reference Records",
+      subtitle: `${filtered.length} matching record${filtered.length === 1 ? "" : "s"} | Exported ${stamp()}`,
+      tables: [
+        {
+          name: "Species",
+          columns: [
+            { header: "Local name" },
+            { header: "Other names" },
+            { header: "Common name" },
+            { header: "Scientific name" },
+            { header: "Notes" },
+          ],
+          rows: filtered.map((record) => [
+            text(record.local_name),
+            text(record.other_names),
+            text(record.common_name),
+            text(record.scientific_name),
+            text(record.notes),
+          ]),
+        },
+      ],
+    };
+    const filename = `species_reference_${stamp()}`;
+    if (kind === "xlsx") await exportXlsx(filename, report);
+    else await exportPdf(filename, report, { landscape: true });
+  }
+
   return (
     <div className="space-y-5">
       <section className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
@@ -75,14 +106,21 @@ export default function SpeciesPage() {
           <h1 className="mt-1 text-2xl font-semibold tracking-tight text-[#14263d]">Species</h1>
           <p className="mt-1 text-sm text-slate-500">Reference names for local, common, and scientific species records.</p>
         </div>
-        <div className="relative w-full sm:max-w-xs">
-          <Search size={16} className="pointer-events-none absolute left-3.5 top-3 text-slate-400" />
-          <input
-            aria-label="Search species"
-            className={`${inputCls} pl-10`}
-            placeholder="Search species"
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
+        <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center">
+          <div className="relative w-full sm:w-64">
+            <Search size={16} className="pointer-events-none absolute left-3.5 top-3 text-slate-400" />
+            <input
+              aria-label="Search species"
+              className={`${inputCls} pl-10`}
+              placeholder="Search species"
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+            />
+          </div>
+          <ExportMenu
+            onExport={exportSpecies}
+            disabled={loading || filtered.length === 0}
+            title="Export species reference records"
           />
         </div>
       </section>
