@@ -4,8 +4,8 @@ import { ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import {
   ArrowDown, ArrowUp, ArrowUpDown, Check, ChevronDown, ChevronLeft, ChevronRight, Clock, Download,
-  FileSpreadsheet, FileText, Layers, Loader2, Package, Pencil, Plus, RotateCcw, Scale, Search, Ship,
-  SlidersHorizontal, Trash2, Trophy, Truck, Wallet, X,
+  FileSpreadsheet, FileText, Layers, Loader2, Package, Pencil, Plus, Scale, Search, Ship,
+  Trash2, Trophy, Truck, Wallet, X,
 } from "lucide-react";
 import { api, formatDate, formatPeso, Landing } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
@@ -27,7 +27,7 @@ const MONTHS = ["January", "February", "March", "April", "May", "June", "July", 
 
 /* Every key here is sent to landings.php as a query-string parameter when it has a value. */
 const EMPTY = {
-  status: "", species: "", from: "", to: "", q: "",
+  status: "", species: "", from: "", to: "",
   delivery: "", period: "", year: THIS_YEAR,
   vessel: "", broker: "", owner: "", origin: "", plate: "", gear: "", ground: "", quality: "",
   min_volume: "", max_volume: "", min_value: "", max_value: "",
@@ -74,19 +74,6 @@ const PERIODS = [
   { label: "12 months", value: "year" },
 ];
 
-const SORTS = [
-  { label: "Newest first", sort: "", dir: "" },
-  { label: "Oldest first", sort: "landing_date", dir: "asc" },
-  { label: "Highest value", sort: "total_value", dir: "desc" },
-  { label: "Lowest value", sort: "total_value", dir: "asc" },
-  { label: "Largest volume", sort: "volume", dir: "desc" },
-  { label: "Smallest volume", sort: "volume", dir: "asc" },
-  { label: "Highest price per kg", sort: "price_per_kg", dir: "desc" },
-  { label: "Supplier A to Z", sort: "boat_name", dir: "asc" },
-  { label: "Broker A to Z", sort: "broker", dir: "asc" },
-  { label: "Plate number A to Z", sort: "plate_number", dir: "asc" },
-];
-
 /* Leaderboard: `key` is the ?top= value, `filter` is the filter it applies when a row is clicked. */
 const TOP_GROUPS: { key: string; label: string; filter: keyof Filters }[] = [
   { key: "vessel", label: "Producer", filter: "vessel" },
@@ -103,17 +90,12 @@ const TOP_METRICS = [
 ];
 
 const FILTER_LABELS: Record<string, string> = {
-  status: "Status", species: "Species", from: "From", to: "To", q: "Search",
+  status: "Status", species: "Species", from: "From", to: "To",
   delivery: "Route", period: "Period", year: "Year", vessel: "Vessel", broker: "Broker", owner: "Owner",
   origin: "Origin", plate: "Plate", gear: "Gear", ground: "Ground", quality: "Quality",
   min_volume: "Min kg", max_volume: "Max kg", min_value: "Min value", max_value: "Max value",
   reviewed: "Review",
 };
-
-const ADVANCED_KEYS: (keyof Filters)[] = [
-  "vessel", "broker", "owner", "origin", "plate", "gear", "ground", "quality",
-  "min_volume", "max_volume", "min_value", "max_value", "reviewed", "sort",
-];
 
 /* Columns of the records export (same order as the By Sea table) */
 const RECORD_COLS: Col[] = [
@@ -279,6 +261,22 @@ function uniqueNames(values: Array<string | null | undefined>) {
     if (name && !names.has(name.toLocaleLowerCase())) names.set(name.toLocaleLowerCase(), name);
   });
   return Array.from(names.values()).toSorted((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
+}
+
+/* Everything a record shows, as one lowercase string, so the search box can match any field */
+const SKIP_SEARCH_KEYS = new Set(["id", "trip_id", "trip_items", "truck_delivery"]);
+function searchText(r: Landing) {
+  const parts: string[] = [
+    formatDate(r.landing_date),
+    formatPeso(r.total_value),
+    Number(r.volume).toLocaleString(),
+    Number(r.truck_delivery) === 1 ? "by land land truck" : "by sea sea boat",
+  ];
+  for (const [k, v] of Object.entries(r)) {
+    if (SKIP_SEARCH_KEYS.has(k) || v === null || v === undefined || v === "") continue;
+    if (typeof v === "string" || typeof v === "number") parts.push(String(v));
+  }
+  return parts.join(" ").toLowerCase();
 }
 
 /* ---------- Small pieces ---------- */
@@ -601,6 +599,7 @@ export default function LandingsPage() {
   const [filters, setFilters] = useState<Filters>(EMPTY);
   const [applied, setApplied] = useState<Filters>(EMPTY);
   const [month, setMonth] = useState("0"); // "0" = whole year / no month filter
+  const [search, setSearch] = useState(""); // simple search over every field of the loaded landings
   const [rows, setRows] = useState<Landing[]>([]);
   const [prev, setPrev] = useState<{ label: string; stats: ReturnType<typeof normalizedSummary> } | null>(null);
   const prevReq = useRef(0);
@@ -615,7 +614,6 @@ export default function LandingsPage() {
   const [recordPageSize, setRecordPageSize] = useState(25);
   const [expandedRows, setExpandedRows] = useState<Set<number>>(() => new Set());
   const [options, setOptions] = useState<Options>(NO_OPTIONS);
-  const [showMore, setShowMore] = useState(false);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
@@ -781,6 +779,7 @@ export default function LandingsPage() {
       applied.year ? `Year: ${applied.year}` : "All years",
       ...(month !== "0" ? [`Month: ${MONTHS[Number(month) - 1]}`] : []),
       ...activeChips.map(([k, v]) => `${FILTER_LABELS[k] ?? k}: ${chipText(k, v)}`),
+      ...(search.trim() ? [`Search: ${search.trim()}`] : []),
       `Exported ${exportedAt}`,
     ].join("  |  ");
   }
@@ -867,7 +866,7 @@ export default function LandingsPage() {
       let skipRejected = true;
 
       if (scope === "shown") {
-        list = sortedRows;
+        list = searchedRows;
         label = month !== "0" ? `${MONTHS[Number(month) - 1]} ${applied.year}` : applied.year || "All years";
         slug = `current-view_${applied.year || "all-years"}${month !== "0" ? "_" + pad(Number(month)) : ""}`;
         subtitle = filterSummary(stamp());
@@ -994,22 +993,9 @@ export default function LandingsPage() {
     setError("");
     setApplied(f);
     setPrev(null);
-    if (f.q.trim()) {
-      // Free-text LIKE searches are the most expensive database operation.
-      // Keep them to one query; rankings, totals and historical comparisons
-      // can load again as soon as the search is cleared. While searching, the
-      // cards fall back to the loaded rows.
-      topReq.current += 1;
-      prevReq.current += 1;
-      totalsReq.current += 1;
-      setTop(null);
-      setTopLoading(false);
-      setTotals(null);
-    } else {
-      loadTop(f);
-      loadPrev(f, m);
-      loadTotals(f, m);
-    }
+    loadTop(f);
+    loadPrev(f, m);
+    loadTotals(f, m);
     try {
       const params: Record<string, string> = Object.fromEntries(buildQs(f));
       if (!f.status && !isAdmin) params.exclude_rejected = "1";
@@ -1174,7 +1160,7 @@ export default function LandingsPage() {
     }
   }
 
-  // Tabs, chips and dropdowns apply straight away; text, dates and numbers wait for Apply / Enter.
+  // Tabs, chips, dropdowns and dates apply straight away.
   // `m` is the month filter that goes with this change (defaults to the current one).
   function apply(patch: Partial<Filters>, m: string = month) {
     const next = { ...filters, ...patch };
@@ -1206,6 +1192,7 @@ export default function LandingsPage() {
   function reset() {
     setFilters(EMPTY);
     setMonth("0");
+    setSearch("");
     setTableSort(null);
     load(EMPTY, "0");
   }
@@ -1213,6 +1200,7 @@ export default function LandingsPage() {
   // Clears every filter and shows the list of all landings (all years)
   function showAll() {
     setTableSort(null);
+    setSearch("");
     apply({ ...EMPTY, year: "" }, "0");
   }
 
@@ -1269,12 +1257,29 @@ export default function LandingsPage() {
     return { count: build(() => 1), value: build((r) => Number(r.total_value || 0)), volume: build(kg) };
   }, [countable]);
 
-  const sortedRows = tableSort ? rows.toSorted(compareBy(tableSort.key, tableSort.dir)) : rows;
+  const sortedRows = useMemo(
+    () => (tableSort ? rows.toSorted(compareBy(tableSort.key, tableSort.dir)) : rows),
+    [rows, tableSort],
+  );
+
+  // Simple search: every word typed must appear somewhere in the record
+  const searchIndex = useMemo(() => new Map(rows.map((r) => [r.id, searchText(r)])), [rows]);
+  const searchTerms = useMemo(() => search.toLowerCase().split(/\s+/).filter(Boolean), [search]);
+  const searchedRows = useMemo(
+    () =>
+      searchTerms.length
+        ? sortedRows.filter((r) => {
+            const text = searchIndex.get(r.id) ?? "";
+            return searchTerms.every((w) => text.includes(w));
+          })
+        : sortedRows,
+    [sortedRows, searchIndex, searchTerms],
+  );
+
   // The year and month have their own selectors, so they are not shown as chips.
   const activeChips = Object.entries(applied).filter(
     ([k, v]) => v && k !== "sort" && k !== "dir" && k !== "year" && !(month !== "0" && (k === "from" || k === "to"))
   );
-  const advancedCount = ADVANCED_KEYS.filter((k) => applied[k]).length;
   const topDef = TOP_GROUPS.find((g) => g.key === topGroup);
   const topMax = top ? Math.max(...top.rows.map((r) => metricNum(top.by, r)), 0) : 0;
   const yearOptions = options.years.length ? options.years : [Number(THIS_YEAR)];
@@ -1290,18 +1295,18 @@ export default function LandingsPage() {
     [options.owners, rows],
   );
 
-  const recordList = filterCardRows(sortedRows, cardFilters);
+  const recordList = filterCardRows(searchedRows, cardFilters);
   const recordPages = Math.max(1, Math.ceil(recordList.length / recordPageSize));
   const safeRecordPage = Math.min(recordPage, recordPages);
   const pageStart = (safeRecordPage - 1) * recordPageSize;
   const visibleRecords = recordList.slice(pageStart, pageStart + recordPageSize);
-  const seaCount = useMemo(() => rows.filter((r) => Number(r.truck_delivery) !== 1).length, [rows]);
-  const landCount = rows.length - seaCount;
+  const seaCount = useMemo(() => searchedRows.filter((r) => Number(r.truck_delivery) !== 1).length, [searchedRows]);
+  const landCount = searchedRows.length - seaCount;
   // Land-only view drops the Supplier / Gear columns; everything else shows all columns
   const recordCols = cardFilters.route === "land" ? LAND_COLUMNS : SEA_COLUMNS;
   const recordMinW = cardFilters.route === "land" ? "min-w-[1100px]" : "min-w-[1450px]";
 
-  const gxList = filterCardRows(sortedRows, { ...cardFilters, route: gxRoute }).filter((r) =>
+  const gxList = filterCardRows(searchedRows, { ...cardFilters, route: gxRoute }).filter((r) =>
     (!gxVessel || r.boat_name === gxVessel) &&
     (!gxOwner || r.boat_owner === gxOwner)
   );
@@ -1319,7 +1324,6 @@ export default function LandingsPage() {
     }`;
   const segmented = "inline-flex rounded-md bg-slate-100 p-1";
   const mobileFilterInput = `${inputCls} h-10 !py-2 text-sm sm:h-auto sm:!py-2.5`;
-  const mobileFilterButton = `${ghostBtn} h-10 !px-3 !py-2 sm:h-auto sm:!px-4 sm:!py-2.5`;
   const selectOptions = (list: string[]) => list.map((s) => <option key={s}>{s}</option>);
 
   return (
@@ -1590,125 +1594,27 @@ export default function LandingsPage() {
           </div>
         </div>
 
-        {/* Filters */}
-        <form
-          onSubmit={(e) => { e.preventDefault(); load(); }}
-          className="border-t border-slate-200 bg-slate-50 p-4"
-        >
-          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 sm:gap-3 lg:grid-cols-[1fr_1fr_1fr_1.4fr_auto]">
-            <select className={mobileFilterInput} value={filters.species} onChange={(e) => apply({ species: e.target.value })}>
-              <option value="">All species</option>
-              {selectOptions(options.species)}
-            </select>
+        {/* Date range (applies immediately) */}
+        <div className="grid grid-cols-1 gap-2 border-t border-slate-200 bg-slate-50 p-4 sm:grid-cols-2 sm:gap-3 lg:max-w-xl">
+          <label className="block">
+            <span className="mb-1 block text-xs font-semibold text-slate-600">From</span>
             <input
               type="date"
-              aria-label="From date"
               className={mobileFilterInput}
               value={filters.from}
-              onChange={(e) => { setFilters({ ...filters, from: e.target.value, period: "" }); setMonth("0"); }}
+              onChange={(e) => apply({ from: e.target.value, period: "" }, "0")}
             />
+          </label>
+          <label className="block">
+            <span className="mb-1 block text-xs font-semibold text-slate-600">To</span>
             <input
               type="date"
-              aria-label="To date"
               className={mobileFilterInput}
               value={filters.to}
-              onChange={(e) => { setFilters({ ...filters, to: e.target.value, period: "" }); setMonth("0"); }}
+              onChange={(e) => apply({ to: e.target.value, period: "" }, "0")}
             />
-            <div className="relative">
-              <Search size={16} className="pointer-events-none absolute left-3.5 top-3.5 text-slate-500" />
-              <input
-                className={`${mobileFilterInput} pl-10 pr-10`}
-                placeholder="Search supplier, owner, broker, species, origin or plate"
-                value={filters.q}
-                onChange={(e) => setFilters({ ...filters, q: e.target.value })}
-                aria-busy={refreshing}
-              />
-              {refreshing && <Loader2 size={16} className="pointer-events-none absolute right-3.5 top-3.5 animate-spin text-sky-600" />}
-            </div>
-            <div className="flex gap-2">
-              <button
-                type="button"
-                onClick={() => setShowMore((v) => !v)}
-                aria-expanded={showMore}
-                className={`${mobileFilterButton} relative`}
-                title="More filters"
-              >
-                <SlidersHorizontal size={15} />
-                {advancedCount > 0 && (
-                  <span className="absolute -right-1.5 -top-1.5 grid h-5 min-w-5 place-items-center rounded-full bg-sky-600 px-1 text-[11px] font-semibold text-white">
-                    {advancedCount}
-                  </span>
-                )}
-              </button>
-              <button type="button" onClick={reset} aria-label="Reset filters" className={mobileFilterButton}>
-                <RotateCcw size={15} />
-              </button>
-              <button className={`${primaryBtn} h-10 !px-4 !py-2 sm:h-auto sm:!py-2.5`}>Apply</button>
-            </div>
-          </div>
-
-          {showMore && (
-            <div className="mt-3 grid grid-cols-1 gap-2 border-t border-slate-200 pt-3 sm:grid-cols-2 sm:gap-3 lg:grid-cols-4">
-              <select aria-label="Supplier" className={mobileFilterInput} value={filters.vessel} onChange={(e) => apply({ vessel: e.target.value })}>
-                <option value="">All suppliers / vessels</option>
-                {selectOptions(options.vessels)}
-              </select>
-              <select aria-label="Broker" className={mobileFilterInput} value={filters.broker} onChange={(e) => apply({ broker: e.target.value })}>
-                <option value="">All brokers</option>
-                {selectOptions(options.brokers)}
-              </select>
-              <select aria-label="Registered owner" className={mobileFilterInput} value={filters.owner} onChange={(e) => apply({ owner: e.target.value })}>
-                <option value="">All owners</option>
-                {selectOptions(options.owners)}
-              </select>
-              <select aria-label="Origin" className={mobileFilterInput} value={filters.origin} onChange={(e) => apply({ origin: e.target.value })}>
-                <option value="">All origins</option>
-                {selectOptions(options.origins)}
-              </select>
-              <select aria-label="Plate number" className={mobileFilterInput} value={filters.plate} onChange={(e) => apply({ plate: e.target.value })}>
-                <option value="">All plate numbers</option>
-                {selectOptions(options.plates)}
-              </select>
-              <select aria-label="Fishing gear" className={mobileFilterInput} value={filters.gear} onChange={(e) => apply({ gear: e.target.value })}>
-                <option value="">All fishing gear</option>
-                {selectOptions(options.gears)}
-              </select>
-              <select aria-label="Fishing ground" className={mobileFilterInput} value={filters.ground} onChange={(e) => apply({ ground: e.target.value })}>
-                <option value="">All fishing grounds</option>
-                {selectOptions(options.grounds)}
-              </select>
-              <select aria-label="Quality" className={mobileFilterInput} value={filters.quality} onChange={(e) => apply({ quality: e.target.value })}>
-                <option value="">Any quality</option>
-                {selectOptions(options.qualities)}
-              </select>
-              <select aria-label="Review state" className={mobileFilterInput} value={filters.reviewed} onChange={(e) => apply({ reviewed: e.target.value })}>
-                <option value="">Reviewed or not</option>
-                <option value="yes">Reviewed</option>
-                <option value="no">Not reviewed yet</option>
-              </select>
-
-              <input type="number" min={0} inputMode="decimal" aria-label="Minimum volume in kg" placeholder="Min volume (kg)" className={mobileFilterInput} value={filters.min_volume} onChange={(e) => setFilters({ ...filters, min_volume: e.target.value })} />
-              <input type="number" min={0} inputMode="decimal" aria-label="Maximum volume in kg" placeholder="Max volume (kg)" className={mobileFilterInput} value={filters.max_volume} onChange={(e) => setFilters({ ...filters, max_volume: e.target.value })} />
-              <input type="number" min={0} inputMode="decimal" aria-label="Minimum total value" placeholder="Min total value" className={mobileFilterInput} value={filters.min_value} onChange={(e) => setFilters({ ...filters, min_value: e.target.value })} />
-              <input type="number" min={0} inputMode="decimal" aria-label="Maximum total value" placeholder="Max total value" className={mobileFilterInput} value={filters.max_value} onChange={(e) => setFilters({ ...filters, max_value: e.target.value })} />
-
-              <select
-                aria-label="Sort"
-                className={`${mobileFilterInput} lg:col-span-2`}
-                value={`${filters.sort}:${filters.dir}`}
-                onChange={(e) => {
-                  const [sort, dir] = e.target.value.split(":");
-                  setTableSort(null);
-                  apply({ sort, dir });
-                }}
-              >
-                {SORTS.map((s) => (
-                  <option key={s.label} value={`${s.sort}:${s.dir}`}>{s.label}</option>
-                ))}
-              </select>
-            </div>
-          )}
-        </form>
+          </label>
+        </div>
 
         {/* What is currently applied */}
         {activeChips.length > 0 && (
@@ -1771,7 +1677,7 @@ export default function LandingsPage() {
                 <div className={`${segmented} max-w-full overflow-x-auto`} role="group" aria-label="Filter by route">
                   <div className="flex w-max gap-1">
                   {([
-                    ["", "All", rows.length, null],
+                    ["", "All", searchedRows.length, null],
                     ["sea", "By sea", seaCount, Ship],
                     ["land", "By land", landCount, Truck],
                   ] as const).map(([v, label, count, Icon]) => (
@@ -1804,8 +1710,36 @@ export default function LandingsPage() {
               </div>
             </div>
 
+            {/* Simple search over every field of the landings */}
+            <div className="shrink-0 border-b border-slate-200 bg-white px-3 py-3 sm:px-4">
+              <div className="relative">
+                <Search size={16} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-500" />
+                <input
+                  type="text"
+                  aria-label="Search landings"
+                  aria-busy={refreshing}
+                  placeholder="Search landings..."
+                  className={`${mobileFilterInput} pl-10 pr-10`}
+                  value={search}
+                  onChange={(e) => { setSearch(e.target.value); setRecordPage(1); }}
+                />
+                {search && (
+                  <button
+                    type="button"
+                    aria-label="Clear search"
+                    onClick={() => { setSearch(""); setRecordPage(1); }}
+                    className="absolute right-2 top-1/2 grid h-7 w-7 -translate-y-1/2 place-items-center rounded-md text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-800"
+                  >
+                    <X size={14} />
+                  </button>
+                )}
+              </div>
+            </div>
+
             {recordList.length === 0 ? (
-              <p className="px-4 py-8 text-center text-sm text-slate-500">No landings match the current filters.</p>
+              <p className="px-4 py-8 text-center text-sm text-slate-500">
+                {search.trim() ? `No landings match “${search.trim()}”.` : "No landings match the current filters."}
+              </p>
             ) : (
               <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
                 {/* Mobile cards */}

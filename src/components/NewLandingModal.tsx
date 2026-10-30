@@ -41,6 +41,12 @@ type SpeciesRecord = {
   common_name: string | null;
 };
 
+/* Names already used in the landings table: boat_name = producer, boat_owner = registered owner */
+type LandingNames = {
+  vessels: string[];
+  owners: string[];
+};
+
 function Field({
   label,
   htmlFor,
@@ -363,6 +369,65 @@ export default function NewLandingModal({ onClose, onSaved }: { onClose: () => v
       });
     return () => controller.abort();
   }, []);
+
+  // Producer (boat_name) and registered owner (boat_owner) options come from the landings themselves
+  const [landingNames, setLandingNames] = useState<LandingNames>({ vessels: [], owners: [] });
+  const [namesLoading, setNamesLoading] = useState(true);
+  useEffect(() => {
+    const controller = new AbortController();
+    const { signal } = controller;
+
+    async function loadNames() {
+      const vessels: string[] = [];
+      const owners: string[] = [];
+
+      // 1) The options endpoint (fast, when it works)
+      try {
+        const o = await api<Partial<LandingNames>>("landings.php?meta=options", { signal });
+        vessels.push(...(o.vessels ?? []));
+        owners.push(...(o.owners ?? []));
+      } catch {
+        /* fall through to the landing rows */
+      }
+
+      // 2) Fallback: read boat_name and boat_owner straight from the landing rows
+      if (!signal.aborted && (vessels.length === 0 || owners.length === 0)) {
+        try {
+          const PAGE = 5000;
+          const seen = new Set<number>();
+          let offset = 0;
+          for (let guard = 0; guard < 50; guard++) {
+            const chunk = await api<{ id: number; boat_name: string | null; boat_owner: string | null }[]>(
+              `landings.php?limit=${PAGE}&offset=${offset}`,
+              { signal },
+            );
+            if (chunk.length === 0) break;
+            let added = 0;
+            for (const r of chunk) {
+              if (seen.has(r.id)) continue;
+              seen.add(r.id);
+              added++;
+              if (r.boat_name) vessels.push(r.boat_name);
+              if (r.boat_owner) owners.push(r.boat_owner);
+            }
+            if (added === 0) break; // server ignored the offset
+            offset += chunk.length;
+          }
+        } catch {
+          /* lists simply stay empty */
+        }
+      }
+
+      if (!signal.aborted) {
+        setLandingNames({ vessels, owners });
+        setNamesLoading(false);
+      }
+    }
+
+    loadNames();
+    return () => controller.abort();
+  }, []);
+
   const brokerOptions = useMemo(() => mergeOptions([], saved.brokers), [saved.brokers]);
   const speciesOptions = useMemo<SpeciesOption[]>(() => {
     const records = speciesRecords.length
@@ -384,8 +449,9 @@ export default function NewLandingModal({ onClose, onSaved }: { onClose: () => v
       .sort((a, b) => a.localName.localeCompare(b.localName, undefined, { numeric: true }));
   }, [saved.species, speciesRecords]);
   const speciesNames = useMemo(() => speciesOptions.map((option) => option.localName), [speciesOptions]);
-  const producerOptions = useMemo(() => mergeOptions([], saved.producers), [saved.producers]);
-  const ownerOptions = useMemo(() => mergeOptions([], saved.owners), [saved.owners]);
+  // boat_name from the landings = producer, boat_owner from the landings = registered owner
+  const producerOptions = useMemo(() => mergeOptions([], landingNames.vessels), [landingNames.vessels]);
+  const ownerOptions = useMemo(() => mergeOptions([], landingNames.owners), [landingNames.owners]);
 
   function update(patch: Partial<typeof f>) {
     setF((prev) => ({ ...prev, ...patch }));
@@ -576,7 +642,7 @@ export default function NewLandingModal({ onClose, onSaved }: { onClose: () => v
             {/* By sea: producer, owner and fishing gear.  By land: owner, origin and plate number. */}
             <div className="mt-5 grid grid-cols-1 gap-4 border-t border-slate-200/80 pt-5 sm:grid-cols-2">
               {!f.truck_delivery && (
-                <Field label="Producer" htmlFor="producer" required>
+                <Field label="Producer (F/B)" htmlFor="producer" required>
                   <Combobox
                     id="producer"
                     required
@@ -585,8 +651,8 @@ export default function NewLandingModal({ onClose, onSaved }: { onClose: () => v
                     onChange={(v) => update({ boat_name: v })}
                     options={producerOptions}
                     allowNew={false}
-                    placeholder="Choose or type a producer"
-                    emptyText="No producers saved yet. Type a name to add one."
+                    placeholder="Choose a producer"
+                    emptyText={namesLoading ? "Loading producers..." : "No matching producer found in the landings."}
                   />
                 </Field>
               )}
@@ -599,8 +665,8 @@ export default function NewLandingModal({ onClose, onSaved }: { onClose: () => v
                   onChange={(v) => update({ boat_owner: v })}
                   options={ownerOptions}
                   allowNew={false}
-                  placeholder="Choose or type an owner"
-                  emptyText="No owners saved yet. Type a name to add one."
+                  placeholder="Choose a registered owner"
+                  emptyText={namesLoading ? "Loading registered owners..." : "No matching registered owner found in the landings."}
                 />
               </Field>
               {f.truck_delivery ? (
