@@ -1,22 +1,15 @@
 "use client";
 
 import { useEffect } from "react";
-import { usePathname, useRouter } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
 import { EntryModalProvider } from "@/context/EntryModalContext";
 import AppShell from "@/components/AppShell";
 
-// Pages a viewer is allowed to open
-const viewerCanOpen = (pathname: string) =>
-  pathname === "/dashboard" || pathname === "/parking" || pathname === "/species" || pathname.startsWith("/dashboard/tenants");
-
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
   const router = useRouter();
-  const pathname = usePathname();
-
-  // Viewer can only see the dashboard and the tenants list
-  const blocked = user?.role === "viewer" && !viewerCanOpen(pathname);
+  const blocked = false;
 
   useEffect(() => {
     if (loading) return;

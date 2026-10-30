@@ -464,6 +464,7 @@ export default function DashboardPage() {
   const today = now.toLocaleDateString("en-PH", { weekday: "long", month: "long", day: "numeric", year: "numeric" });
   const greeting = now.getHours() < 12 ? "Good morning" : now.getHours() < 18 ? "Good afternoon" : "Good evening";
   const canAdd = user?.role !== "viewer";
+  const canViewLandings = true;
 
   // Current vs previous period
   const cur = {
@@ -665,7 +666,7 @@ export default function DashboardPage() {
           newActivityLabel={recordCoverageLabel}
           spark={sparks.amount}
         />
-        {canAdd ? (
+        {canViewLandings ? (
           <Link
             href={`/landings?status=pending&year=${year}`}
             aria-label="Go to pending landings"
@@ -836,7 +837,7 @@ export default function DashboardPage() {
       <section className={card}>
         <div className="flex items-center justify-between gap-3 px-5 py-4">
           <CardHeader title="Recent landings" subtitle={`The latest entries in ${periodLabel}`} />
-          {canAdd && <Link href="/landings" className="shrink-0 text-xs font-semibold text-[#0875d1] hover:text-[#1a8cc7]">View all landings</Link>}
+          {canViewLandings && <Link href="/landings" className="shrink-0 text-xs font-semibold text-[#0875d1] hover:text-[#1a8cc7]">View all landings</Link>}
         </div>
 
         {loading ? (

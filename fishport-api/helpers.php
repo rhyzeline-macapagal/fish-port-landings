@@ -74,6 +74,9 @@ function auth_user(array $roles = []): array {
   $u = $st->fetch();
 
   if (!$u) json_out(['error' => 'Unauthorized'], 401);
-  if ($roles && !in_array($u['role'], $roles, true)) json_out(['error' => 'Forbidden'], 403);
+  $userRole = strtolower(trim((string)$u['role']));
+  $allowedRoles = array_map(fn($role) => strtolower(trim((string)$role)), $roles);
+  if ($allowedRoles && !in_array($userRole, $allowedRoles, true)) json_out(['error' => 'Forbidden'], 403);
+  $u['role'] = $userRole;
   return $u;
 }

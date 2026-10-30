@@ -41,6 +41,7 @@ export default function AppHeader({ onMenuOpen }: { onMenuOpen: () => void }) {
   const [history, setHistory] = useState<DeletedHistoryRecord[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const accountMenu = useRef<HTMLDivElement>(null);
+  const logoutDialog = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!logoutOpen) return;
@@ -54,7 +55,7 @@ export default function AppHeader({ onMenuOpen }: { onMenuOpen: () => void }) {
   useEffect(() => {
     if (!notificationsOpen && !logoutOpen) return;
     const closeMenus = (event: MouseEvent) => {
-      if (!accountMenu.current?.contains(event.target as Node)) {
+      if (!accountMenu.current?.contains(event.target as Node) && !logoutDialog.current?.contains(event.target as Node)) {
         setNotificationsOpen(false);
         setLogoutOpen(false);
       }
@@ -135,8 +136,9 @@ export default function AppHeader({ onMenuOpen }: { onMenuOpen: () => void }) {
         </div>
       </div>
 
-      {logoutOpen && (
+      {logoutOpen && createPortal(
         <div
+          ref={logoutDialog}
           role="alertdialog"
           aria-modal="true"
           aria-labelledby="logout-confirmation-title"
@@ -148,9 +150,9 @@ export default function AppHeader({ onMenuOpen }: { onMenuOpen: () => void }) {
               <AlertTriangle size={19} />
             </span>
             <div className="min-w-0 flex-1">
-              <h2 id="logout-confirmation-title" className="font-semibold text-slate-900">Log out of FishPort?</h2>
+              <h2 id="logout-confirmation-title" className="font-semibold text-slate-900">Are you sure you want to logout?</h2>
               <p id="logout-confirmation-description" className="mt-1 text-sm leading-5 text-slate-600">
-                Are you sure you want to end your current session?
+                You will be returned to the login screen.
               </p>
             </div>
           </div>
@@ -161,7 +163,7 @@ export default function AppHeader({ onMenuOpen }: { onMenuOpen: () => void }) {
               onClick={() => setLogoutOpen(false)}
               className="rounded-lg border border-slate-200 bg-white px-3.5 py-2 text-xs font-semibold text-slate-700 transition-colors hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400/40"
             >
-              Stay signed in
+                Cancel
             </button>
             <button
               type="button"
@@ -171,10 +173,11 @@ export default function AppHeader({ onMenuOpen }: { onMenuOpen: () => void }) {
               }}
               className="inline-flex items-center gap-2 rounded-lg bg-red-600 px-3.5 py-2 text-xs font-semibold text-white transition-colors hover:bg-red-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400/40"
             >
-              <LogOut size={14} /> Log out
+              <LogOut size={14} /> OK
             </button>
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
       {deletedRecord && createPortal(
         <div className="fixed inset-0 z-[10000] flex items-center justify-center overflow-y-auto bg-slate-900/50 p-4" onClick={() => setDeletedRecord(null)}>

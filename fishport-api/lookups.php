@@ -6,10 +6,11 @@ $type = $_GET['type'] ?? '';
 if (!isset($tables[$type])) json_out(['error' => 'Unknown list'], 422);
 $table = $tables[$type];
 
-auth_user(['admin', 'encoder']);
+$method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
+auth_user($method === 'GET' ? ['admin', 'encoder', 'viewer'] : ['admin', 'encoder']);
 $pdo = db();
 
-if ($_SERVER['REQUEST_METHOD'] === 'GET') {
+if ($method === 'GET') {
   if ($type === 'brokers') {
     // Brokers now come from fp_tenants (fish_broker category)
     $names = $pdo->query(

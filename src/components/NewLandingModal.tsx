@@ -76,8 +76,8 @@ function Field({
 
 function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
-    <div className="rounded-2xl border border-slate-200/80 bg-white/60 p-5 shadow-sm">
-      <h3 className="mb-4 flex items-center gap-2 text-sm font-semibold text-slate-900">
+    <div className="rounded-2xl border border-slate-200/80 bg-white/60 p-4 shadow-sm">
+      <h3 className="mb-3 flex items-center gap-2 text-sm font-semibold text-slate-900">
         <span className="h-4 w-1 rounded-full bg-sky-500" />
         {title}
       </h3>
@@ -576,12 +576,13 @@ export default function NewLandingModal({ onClose, onSaved }: { onClose: () => v
       subtitle="Saved as pending until an admin reviews it."
       icon={<Fish size={21} />}
       onClose={onClose}
+      maxWidthClassName="max-w-4xl"
     >
       <form onSubmit={onSubmit} noValidate>
-        <div className="space-y-4 bg-slate-50/40 px-4 py-5 sm:px-6">
+        <div className="space-y-3 bg-slate-50/40 px-3 py-4 sm:px-5">
           {/* Schedule */}
           <Section title="Schedule">
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <Field label="Date" htmlFor="landing-date" required>
                 <input
                   id="landing-date"
@@ -640,7 +641,7 @@ export default function NewLandingModal({ onClose, onSaved }: { onClose: () => v
             </div>
 
             {/* By sea: producer, owner and fishing gear.  By land: owner, origin and plate number. */}
-            <div className="mt-5 grid grid-cols-1 gap-4 border-t border-slate-200/80 pt-5 sm:grid-cols-2">
+            <div className="mt-4 grid grid-cols-1 gap-3 border-t border-slate-200/80 pt-4 sm:grid-cols-2">
               {!f.truck_delivery && (
                 <Field label="Producer (F/B)" htmlFor="producer" required>
                   <Combobox
@@ -710,9 +711,9 @@ export default function NewLandingModal({ onClose, onSaved }: { onClose: () => v
 
           {/* Catch and pricing */}
           <Section title="Catch and pricing">
-            <div className="space-y-4">
+            <div className="space-y-3">
               {items.map((it, i) => (
-                <div key={it.uid} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+                <div key={it.uid} className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
                   <div className="mb-3 flex items-center justify-between">
                     <p className="text-sm font-semibold text-slate-700">
                       {items.length > 1 ? `Species ${i + 1}` : "Species"}
@@ -730,7 +731,7 @@ export default function NewLandingModal({ onClose, onSaved }: { onClose: () => v
                     )}
                   </div>
 
-                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
                     <Field label="Species" htmlFor={`species-${i}`} required>
                       <Combobox
                         id={`species-${i}`}

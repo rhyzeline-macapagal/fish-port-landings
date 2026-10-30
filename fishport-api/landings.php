@@ -160,7 +160,7 @@ function lf_where(array $g, bool $isTop): array {
  *    ?summary=1  (+ any filter above, optionally &exclude_rejected=1)
  * ------------------------------------------------------------------ */
 if ($_SERVER['REQUEST_METHOD'] === 'GET') {
-  auth_user(['admin', 'encoder']);
+  auth_user(['admin', 'encoder', 'viewer']);
   $g = $_GET;
 
   // ---- distinct values for the filter dropdowns ----
