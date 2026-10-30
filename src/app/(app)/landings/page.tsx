@@ -57,8 +57,8 @@ type LandingSummary = { count: number | string; volume: number | string; value: 
 
 type ExportScope = "all" | "year" | "range" | "shown";
 type RouteFilter = "" | "sea" | "land";
-type RecordCardFilters = { search: string; route: RouteFilter; status: string; species: string; sort: string };
-const EMPTY_CARD_FILTERS: RecordCardFilters = { search: "", route: "", status: "", species: "", sort: "newest" };
+type RecordCardFilters = { route: RouteFilter; sort: string };
+const EMPTY_CARD_FILTERS: RecordCardFilters = { route: "", sort: "newest" };
 
 const TABS = [
   { label: "All", value: "", dot: "" },
@@ -400,7 +400,7 @@ function ReviewActions({
     labelled ? "px-3.5" : "w-8"
   }`;
   return (
-    <div className="flex justify-end gap-1.5">
+    <div className={`flex justify-end gap-1.5 ${labelled ? "[&>button]:h-10" : ""}`}>
       {onEdit && (
         <button
           type="button"
@@ -480,14 +480,9 @@ function compareBy(key: SortKey, dir: "asc" | "desc") {
 }
 
 function filterCardRows(list: Landing[], f: RecordCardFilters) {
-  const q = f.search.trim().toLowerCase();
   const filtered = list.filter((r) => {
-    const matchesSearch = !q || [r.boat_name, r.boat_owner, r.broker, r.species, r.origin, r.plate_number, r.fishing_gear, r.status]
-      .some((v) => String(v ?? "").toLowerCase().includes(q));
     const matchesRoute = !f.route || (f.route === "land") === (Number(r.truck_delivery) === 1);
-    return matchesSearch && matchesRoute
-      && (!f.status || String(r.status).toLowerCase() === f.status)
-      && (!f.species || String(r.species ?? "") === f.species);
+    return matchesRoute;
   });
   const sorters: Record<string, (a: Landing, b: Landing) => number> = {
     newest: (a, b) => `${b.landing_date} ${b.landing_time ?? ""}`.localeCompare(`${a.landing_date} ${a.landing_time ?? ""}`),
@@ -499,40 +494,6 @@ function filterCardRows(list: Landing[], f: RecordCardFilters) {
     supplier: (a, b) => String(a.boat_name ?? "").localeCompare(String(b.boat_name ?? "")),
   };
   return filtered.toSorted(sorters[f.sort] ?? sorters.newest);
-}
-
-// Keep keystrokes local to this small component. The large records table only
-// re-renders after the user pauses, instead of once for every typed character.
-function RecordSearchInput({ value, onSearch }: { value: string; onSearch: (value: string) => void }) {
-  const [draft, setDraft] = useState(value);
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  useEffect(() => () => {
-    if (timer.current) clearTimeout(timer.current);
-  }, []);
-
-  function update(next: string) {
-    setDraft(next);
-    if (timer.current) clearTimeout(timer.current);
-    timer.current = setTimeout(() => onSearch(next), 180);
-  }
-
-  return (
-    <div className="relative">
-      <Search size={15} className="pointer-events-none absolute left-3 top-3 text-slate-400" />
-      <input
-        aria-label="Search records"
-        aria-busy={draft !== value}
-        className={`${inputCls} pl-9 pr-9`}
-        placeholder="Search records"
-        value={draft}
-        onChange={(e) => update(e.target.value)}
-      />
-      {draft !== value && (
-        <Loader2 size={14} className="pointer-events-none absolute right-3 top-3 animate-spin text-sky-600" />
-      )}
-    </div>
-  );
 }
 
 function SortTh({
@@ -636,7 +597,7 @@ function filtersFromUrl(): Filters {
 
 export default function LandingsPage() {
   const { user } = useAuth();
-  const { openNewEntry, version } = useEntryModal();
+  const { openNewEntry, version, showToast, addNotification } = useEntryModal();
   const [filters, setFilters] = useState<Filters>(EMPTY);
   const [applied, setApplied] = useState<Filters>(EMPTY);
   const [month, setMonth] = useState("0"); // "0" = whole year / no month filter
@@ -983,7 +944,7 @@ export default function LandingsPage() {
         // Exactly what the card lists, narrowed to the chosen supplier / owner / plate
         list = gxList;
         period = month !== "0" ? `${MONTHS[Number(month) - 1]} ${applied.year}` : applied.year || "All years";
-        skipRejected = applied.status !== "rejected" && cardFilters.status !== "rejected";
+        skipRejected = applied.status !== "rejected";
       } else {
         // Ignores the page filters, so a full history can be exported
         const params: Record<string, string> = { sort: "landing_date", dir: "asc" };
@@ -1058,7 +1019,9 @@ export default function LandingsPage() {
       setRows(Array.from(new Map(all.map((r) => [r.id, r])).values()));
     } catch (e) {
       if (id === listReq.current && !(e instanceof DOMException && e.name === "AbortError")) {
-        setError(e instanceof Error ? e.message : "Could not load landings.");
+        setError(e instanceof Error && e.message !== "Failed to fetch"
+          ? e.message
+          : "Landings service is unavailable. Check the API deployment and connection, then try again.");
       }
     } finally {
       if (id === listReq.current) {
@@ -1166,13 +1129,15 @@ export default function LandingsPage() {
     setDeleteBusy(true);
     setError("");
     try {
-      await api("landing_delete.php", {
+      const deletion = await api<{ archive_ids?: number[]; deleted_by?: string }>("landing_delete.php", {
         method: "POST",
         body: JSON.stringify(deleting.trip_id ? { trip_id: deleting.trip_id } : { id: deleting.id }),
       });
       setDeleting(null);
       await load();
       loadOptions();
+      showToast("Record Deleted!");
+      (deletion.archive_ids ?? []).forEach((archiveId) => addNotification("Landing record deleted", archiveId, deletion.deleted_by));
     } catch (e) {
       setDeleting(null);
       setError(e instanceof Error ? e.message : "Could not delete the landing.");
@@ -1353,6 +1318,8 @@ export default function LandingsPage() {
       on ? "bg-sky-600 text-white" : "text-slate-600 hover:text-slate-900"
     }`;
   const segmented = "inline-flex rounded-md bg-slate-100 p-1";
+  const mobileFilterInput = `${inputCls} h-10 !py-2 text-sm sm:h-auto sm:!py-2.5`;
+  const mobileFilterButton = `${ghostBtn} h-10 !px-3 !py-2 sm:h-auto sm:!px-4 sm:!py-2.5`;
   const selectOptions = (list: string[]) => list.map((s) => <option key={s}>{s}</option>);
 
   return (
@@ -1367,7 +1334,7 @@ export default function LandingsPage() {
           </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:items-center">
           <AnimatedSelect
             label="Year"
             value={filters.year}
@@ -1376,7 +1343,7 @@ export default function LandingsPage() {
               { value: "", label: "All years" },
               ...yearOptions.map((year) => ({ value: String(year), label: String(year) })),
             ]}
-            className="min-w-28"
+            className="min-w-0"
             align="right"
           />
 
@@ -1388,14 +1355,14 @@ export default function LandingsPage() {
               { value: "0", label: "All months" },
               ...MONTHS.map((name, index) => ({ value: String(index + 1), label: name })),
             ]}
-            className="min-w-32"
+            className="min-w-0"
             align="right"
           />
 
           <button
             type="button"
             onClick={showAll}
-            className={ghostBtn}
+            className={`${ghostBtn} w-full sm:w-auto`}
             title="Clear every filter and show all landings from all years"
           >
             Show all
@@ -1414,7 +1381,7 @@ export default function LandingsPage() {
 
           <button
             onClick={openNewEntry}
-            className={primaryBtn}
+            className={`${primaryBtn} col-span-2 w-full sm:w-auto`}
           >
             <Plus size={16} /> Record a landing
           </button>
@@ -1581,18 +1548,21 @@ export default function LandingsPage() {
       {/* Landing records: filters card */}
       <div ref={recordsRef} className={`${card} scroll-mt-4 overflow-hidden`}>
         {/* Status, route and period shortcuts */}
-        <div className="flex flex-wrap items-center gap-3 p-4">
-          <div className={segmented}>
+        <div className="flex flex-col gap-3 p-3 sm:flex-row sm:flex-wrap sm:items-center sm:p-4">
+          <div className={`${segmented} w-full overflow-x-auto sm:w-auto`}>
+            <div className="flex w-max gap-1">
             {TABS.map((t) => (
-              <button key={t.label} onClick={() => apply({ status: t.value })} className={pill(filters.status === t.value)}>
+              <button key={t.label} onClick={() => apply({ status: t.value })} className={`${pill(filters.status === t.value)} shrink-0`}>
                 {t.dot && <span className={`h-2 w-2 rounded-full ${t.dot}`} />}
                 {t.label}
               </button>
             ))}
+            </div>
           </div>
 
           {/* Rolling periods can cross a year boundary, so picking one switches to all years */}
-          <div className={segmented}>
+          <div className={`${segmented} w-full overflow-x-auto sm:w-auto`}>
+            <div className="flex w-max gap-1">
             {PERIODS.map((p) => (
               <button
                 key={p.value}
@@ -1600,7 +1570,7 @@ export default function LandingsPage() {
                   const next = filters.period === p.value ? "" : p.value;
                   apply({ period: next, year: next ? "" : THIS_YEAR, from: "", to: "" }, "0");
                 }}
-                className={pill(filters.period === p.value)}
+                className={`${pill(filters.period === p.value)} shrink-0`}
               >
                 {p.label}
               </button>
@@ -1610,12 +1580,13 @@ export default function LandingsPage() {
                 type="button"
                 onClick={approveAll}
                 disabled={bulkBusy}
-                className="ml-auto inline-flex items-center gap-2 rounded-md bg-emerald-600 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-emerald-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/50 disabled:cursor-not-allowed disabled:opacity-60"
+                className="ml-2 inline-flex shrink-0 items-center gap-2 rounded-md bg-emerald-600 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-emerald-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/50 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 <Check size={16} />
                 {bulkBusy ? "Approving..." : `Approve all (${pendingCount})`}
               </button>
             )}
+            </div>
           </div>
         </div>
 
@@ -1624,29 +1595,29 @@ export default function LandingsPage() {
           onSubmit={(e) => { e.preventDefault(); load(); }}
           className="border-t border-slate-200 bg-slate-50 p-4"
         >
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-[1fr_1fr_1fr_1.4fr_auto]">
-            <select className={inputCls} value={filters.species} onChange={(e) => apply({ species: e.target.value })}>
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 sm:gap-3 lg:grid-cols-[1fr_1fr_1fr_1.4fr_auto]">
+            <select className={mobileFilterInput} value={filters.species} onChange={(e) => apply({ species: e.target.value })}>
               <option value="">All species</option>
               {selectOptions(options.species)}
             </select>
             <input
               type="date"
               aria-label="From date"
-              className={inputCls}
+              className={mobileFilterInput}
               value={filters.from}
               onChange={(e) => { setFilters({ ...filters, from: e.target.value, period: "" }); setMonth("0"); }}
             />
             <input
               type="date"
               aria-label="To date"
-              className={inputCls}
+              className={mobileFilterInput}
               value={filters.to}
               onChange={(e) => { setFilters({ ...filters, to: e.target.value, period: "" }); setMonth("0"); }}
             />
             <div className="relative">
               <Search size={16} className="pointer-events-none absolute left-3.5 top-3.5 text-slate-500" />
               <input
-                className={`${inputCls} pl-10 pr-10`}
+                className={`${mobileFilterInput} pl-10 pr-10`}
                 placeholder="Search supplier, owner, broker, species, origin or plate"
                 value={filters.q}
                 onChange={(e) => setFilters({ ...filters, q: e.target.value })}
@@ -1659,7 +1630,7 @@ export default function LandingsPage() {
                 type="button"
                 onClick={() => setShowMore((v) => !v)}
                 aria-expanded={showMore}
-                className={`${ghostBtn} relative`}
+                className={`${mobileFilterButton} relative`}
                 title="More filters"
               >
                 <SlidersHorizontal size={15} />
@@ -1669,61 +1640,61 @@ export default function LandingsPage() {
                   </span>
                 )}
               </button>
-              <button type="button" onClick={reset} aria-label="Reset filters" className={ghostBtn}>
+              <button type="button" onClick={reset} aria-label="Reset filters" className={mobileFilterButton}>
                 <RotateCcw size={15} />
               </button>
-              <button className={primaryBtn}>Apply</button>
+              <button className={`${primaryBtn} h-10 !px-4 !py-2 sm:h-auto sm:!py-2.5`}>Apply</button>
             </div>
           </div>
 
           {showMore && (
-            <div className="mt-3 grid grid-cols-1 gap-3 border-t border-slate-200 pt-3 sm:grid-cols-2 lg:grid-cols-4">
-              <select aria-label="Supplier" className={inputCls} value={filters.vessel} onChange={(e) => apply({ vessel: e.target.value })}>
+            <div className="mt-3 grid grid-cols-1 gap-2 border-t border-slate-200 pt-3 sm:grid-cols-2 sm:gap-3 lg:grid-cols-4">
+              <select aria-label="Supplier" className={mobileFilterInput} value={filters.vessel} onChange={(e) => apply({ vessel: e.target.value })}>
                 <option value="">All suppliers / vessels</option>
                 {selectOptions(options.vessels)}
               </select>
-              <select aria-label="Broker" className={inputCls} value={filters.broker} onChange={(e) => apply({ broker: e.target.value })}>
+              <select aria-label="Broker" className={mobileFilterInput} value={filters.broker} onChange={(e) => apply({ broker: e.target.value })}>
                 <option value="">All brokers</option>
                 {selectOptions(options.brokers)}
               </select>
-              <select aria-label="Registered owner" className={inputCls} value={filters.owner} onChange={(e) => apply({ owner: e.target.value })}>
+              <select aria-label="Registered owner" className={mobileFilterInput} value={filters.owner} onChange={(e) => apply({ owner: e.target.value })}>
                 <option value="">All owners</option>
                 {selectOptions(options.owners)}
               </select>
-              <select aria-label="Origin" className={inputCls} value={filters.origin} onChange={(e) => apply({ origin: e.target.value })}>
+              <select aria-label="Origin" className={mobileFilterInput} value={filters.origin} onChange={(e) => apply({ origin: e.target.value })}>
                 <option value="">All origins</option>
                 {selectOptions(options.origins)}
               </select>
-              <select aria-label="Plate number" className={inputCls} value={filters.plate} onChange={(e) => apply({ plate: e.target.value })}>
+              <select aria-label="Plate number" className={mobileFilterInput} value={filters.plate} onChange={(e) => apply({ plate: e.target.value })}>
                 <option value="">All plate numbers</option>
                 {selectOptions(options.plates)}
               </select>
-              <select aria-label="Fishing gear" className={inputCls} value={filters.gear} onChange={(e) => apply({ gear: e.target.value })}>
+              <select aria-label="Fishing gear" className={mobileFilterInput} value={filters.gear} onChange={(e) => apply({ gear: e.target.value })}>
                 <option value="">All fishing gear</option>
                 {selectOptions(options.gears)}
               </select>
-              <select aria-label="Fishing ground" className={inputCls} value={filters.ground} onChange={(e) => apply({ ground: e.target.value })}>
+              <select aria-label="Fishing ground" className={mobileFilterInput} value={filters.ground} onChange={(e) => apply({ ground: e.target.value })}>
                 <option value="">All fishing grounds</option>
                 {selectOptions(options.grounds)}
               </select>
-              <select aria-label="Quality" className={inputCls} value={filters.quality} onChange={(e) => apply({ quality: e.target.value })}>
+              <select aria-label="Quality" className={mobileFilterInput} value={filters.quality} onChange={(e) => apply({ quality: e.target.value })}>
                 <option value="">Any quality</option>
                 {selectOptions(options.qualities)}
               </select>
-              <select aria-label="Review state" className={inputCls} value={filters.reviewed} onChange={(e) => apply({ reviewed: e.target.value })}>
+              <select aria-label="Review state" className={mobileFilterInput} value={filters.reviewed} onChange={(e) => apply({ reviewed: e.target.value })}>
                 <option value="">Reviewed or not</option>
                 <option value="yes">Reviewed</option>
                 <option value="no">Not reviewed yet</option>
               </select>
 
-              <input type="number" min={0} inputMode="decimal" aria-label="Minimum volume in kg" placeholder="Min volume (kg)" className={inputCls} value={filters.min_volume} onChange={(e) => setFilters({ ...filters, min_volume: e.target.value })} />
-              <input type="number" min={0} inputMode="decimal" aria-label="Maximum volume in kg" placeholder="Max volume (kg)" className={inputCls} value={filters.max_volume} onChange={(e) => setFilters({ ...filters, max_volume: e.target.value })} />
-              <input type="number" min={0} inputMode="decimal" aria-label="Minimum total value" placeholder="Min total value" className={inputCls} value={filters.min_value} onChange={(e) => setFilters({ ...filters, min_value: e.target.value })} />
-              <input type="number" min={0} inputMode="decimal" aria-label="Maximum total value" placeholder="Max total value" className={inputCls} value={filters.max_value} onChange={(e) => setFilters({ ...filters, max_value: e.target.value })} />
+              <input type="number" min={0} inputMode="decimal" aria-label="Minimum volume in kg" placeholder="Min volume (kg)" className={mobileFilterInput} value={filters.min_volume} onChange={(e) => setFilters({ ...filters, min_volume: e.target.value })} />
+              <input type="number" min={0} inputMode="decimal" aria-label="Maximum volume in kg" placeholder="Max volume (kg)" className={mobileFilterInput} value={filters.max_volume} onChange={(e) => setFilters({ ...filters, max_volume: e.target.value })} />
+              <input type="number" min={0} inputMode="decimal" aria-label="Minimum total value" placeholder="Min total value" className={mobileFilterInput} value={filters.min_value} onChange={(e) => setFilters({ ...filters, min_value: e.target.value })} />
+              <input type="number" min={0} inputMode="decimal" aria-label="Maximum total value" placeholder="Max total value" className={mobileFilterInput} value={filters.max_value} onChange={(e) => setFilters({ ...filters, max_value: e.target.value })} />
 
               <select
                 aria-label="Sort"
-                className={`${inputCls} lg:col-span-2`}
+                className={`${mobileFilterInput} lg:col-span-2`}
                 value={`${filters.sort}:${filters.dir}`}
                 onChange={(e) => {
                   const [sort, dir] = e.target.value.split(":");
@@ -1741,7 +1712,7 @@ export default function LandingsPage() {
 
         {/* What is currently applied */}
         {activeChips.length > 0 && (
-          <div className="flex flex-wrap items-center gap-2 border-t border-slate-200 px-4 py-3">
+          <div className="flex flex-wrap items-center gap-2 border-t border-slate-200 px-3 py-3 sm:px-4">
             <span className="text-xs font-medium text-slate-600">Filtering by</span>
             {activeChips.map(([k, v]) => (
               <button
@@ -1786,8 +1757,8 @@ export default function LandingsPage() {
       ) : (
         <div className="space-y-3">
           {/* One records card with a route filter (All / By sea / By land) */}
-          <section className={`${card} flex h-[640px] min-w-0 flex-col overflow-hidden`}>
-            <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-slate-50 px-4 py-3">
+          <section className={`${card} flex h-[calc(100dvh-9rem)] min-h-[28rem] max-h-[640px] min-w-0 flex-col overflow-hidden sm:h-[640px]`}>
+            <div className="flex shrink-0 flex-col gap-3 border-b border-slate-200 bg-slate-50 px-3 py-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between sm:px-4">
               <div className="flex items-center gap-2.5">
                 <span className="grid h-8 w-8 place-items-center rounded-lg bg-sky-50 text-sky-600">
                   <Package size={17} />
@@ -1795,9 +1766,10 @@ export default function LandingsPage() {
                 <h3 className="font-semibold text-slate-900">Landing records</h3>
               </div>
 
-              <div className="flex flex-wrap items-center gap-2">
+              <div className="flex min-w-0 flex-wrap items-center gap-2">
                 {/* Route filter */}
-                <div className={segmented} role="group" aria-label="Filter by route">
+                <div className={`${segmented} max-w-full overflow-x-auto`} role="group" aria-label="Filter by route">
+                  <div className="flex w-max gap-1">
                   {([
                     ["", "All", rows.length, null],
                     ["sea", "By sea", seaCount, Ship],
@@ -1808,13 +1780,14 @@ export default function LandingsPage() {
                       type="button"
                       aria-pressed={cardFilters.route === v}
                       onClick={() => updateCardFilters({ route: v })}
-                      className={pill(cardFilters.route === v)}
+                      className={`${pill(cardFilters.route === v)} shrink-0`}
                     >
                       {Icon && <Icon size={14} />}
                       {label}
                       <span className="text-xs opacity-70">{count}</span>
                     </button>
                   ))}
+                  </div>
                 </div>
 
                 <span className="rounded-full bg-white px-3 py-1 text-xs font-medium text-slate-600 ring-1 ring-slate-200">
@@ -1824,27 +1797,11 @@ export default function LandingsPage() {
                   type="button"
                   onClick={openGroupExport}
                   title="Export these records"
-                  className="inline-flex items-center gap-1.5 rounded-md bg-white px-3 py-1.5 text-xs font-medium text-slate-700 ring-1 ring-slate-200 transition-colors hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500"
+                  className="inline-flex shrink-0 items-center gap-1.5 rounded-md bg-white px-3 py-2 text-xs font-medium text-slate-700 ring-1 ring-slate-200 transition-colors hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500"
                 >
                   <Download size={14} /> Export
                 </button>
               </div>
-            </div>
-
-            <div className="grid shrink-0 grid-cols-1 gap-2 border-b border-slate-200 bg-white p-3 sm:grid-cols-2 lg:grid-cols-[minmax(180px,1fr)_150px_180px_180px]">
-              <RecordSearchInput
-                value={cardFilters.search}
-                onSearch={(search) => updateCardFilters({ search })}
-              />
-              <select aria-label="Status filter" className={inputCls} value={cardFilters.status} onChange={(e) => updateCardFilters({ status: e.target.value })}>
-                <option value="">All statuses</option><option value="pending">Pending</option><option value="approved">Approved</option><option value="rejected">Rejected</option>
-              </select>
-              <select aria-label="Species filter" className={inputCls} value={cardFilters.species} onChange={(e) => updateCardFilters({ species: e.target.value })}>
-                <option value="">All species</option>{selectOptions(options.species)}
-              </select>
-              <select aria-label="Sort records" className={inputCls} value={cardFilters.sort} onChange={(e) => updateCardFilters({ sort: e.target.value })}>
-                <option value="newest">Newest first</option><option value="oldest">Oldest first</option><option value="value_desc">Highest value</option><option value="value_asc">Lowest value</option><option value="volume_desc">Largest volume</option><option value="volume_asc">Smallest volume</option><option value="supplier">Supplier A–Z</option>
-              </select>
             </div>
 
             {recordList.length === 0 ? (
@@ -1856,42 +1813,52 @@ export default function LandingsPage() {
                   {visibleRecords.map((r) => {
                     const expanded = expandedRows.has(r.id);
                     return (
-                    <li key={r.id} className="space-y-3 p-4">
-                      <div className="flex items-start justify-between gap-3">
+                    <li key={r.id} className="space-y-5 p-6">
+                      <div className="flex items-start justify-between gap-4">
                         <div className="flex min-w-0 items-center gap-3">
-                          <Avatar name={r.boat_name} />
+                          <div className="scale-110"><Avatar name={r.boat_name} /></div>
                           <div className="min-w-0">
-                            <p className="truncate font-medium text-slate-900">{r.boat_name}</p>
-                            <p className="text-xs text-slate-600">{formatDate(r.landing_date)} {formatTime(r.landing_time)}</p>
+                            <p className="break-words text-lg font-semibold leading-tight text-slate-900">{r.boat_name}</p>
+                            <p className="mt-1.5 text-sm text-slate-600">{formatDate(r.landing_date)} <span className="text-slate-400">at</span> {formatTime(r.landing_time)}</p>
                           </div>
                         </div>
-                        <StatusBadge status={r.status} />
+                        <span className="shrink-0"><StatusBadge status={r.status} /></span>
                       </div>
-                      <div className="flex flex-wrap items-center gap-2">
-                        <SpeciesChip species={r.species} />
+                      <div className="flex flex-wrap items-center gap-2 border-b border-slate-100 pb-3">
+                        <span className="text-sm"><SpeciesChip species={r.species} /></span>
                         <TripChip items={r.trip_items} />
                         <Delivery truck={Number(r.truck_delivery) === 1} />
                         {r.origin && <span className="text-xs text-slate-600">from {r.origin}</span>}
                         {r.plate_number && <PlateChip plate={r.plate_number} />}
                       </div>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="rounded-xl bg-slate-50 px-4 py-3">
+                          <p className="text-xs font-medium text-slate-500">Volume</p>
+                          <p className="mt-1 text-base font-semibold tabular-nums text-slate-900">{Number(r.volume).toLocaleString()} {r.unit}</p>
+                        </div>
+                        <div className="rounded-xl bg-slate-50 px-4 py-3">
+                          <p className="text-xs font-medium text-slate-500">Total value</p>
+                          <p className="mt-1 text-base font-semibold tabular-nums text-[#14263d]">{formatPeso(r.total_value)}</p>
+                        </div>
+                      </div>
                       <button
                         type="button"
                         aria-expanded={expanded}
                         onClick={() => toggleExpanded(r.id)}
-                        className="flex w-full items-center justify-between rounded-lg border border-slate-200 px-3 py-2 text-left text-xs font-medium text-slate-700"
+                        className="flex min-h-10 w-full items-center justify-between rounded-lg border border-slate-200 px-3.5 py-2.5 text-left text-xs font-semibold text-slate-700 transition-colors hover:bg-slate-50"
                       >
-                        {expanded ? "Hide details" : "View details"}
+                        {expanded ? "Hide more details" : "View more details"}
                         <ChevronDown size={15} className={`transition-transform ${expanded ? "rotate-180" : ""}`} />
                       </button>
-                      {expanded && <div className="grid grid-cols-2 gap-3 rounded-md bg-slate-50 p-3 text-sm">
+                      {expanded && <div className="grid grid-cols-2 gap-x-4 gap-y-3 rounded-lg border border-slate-100 bg-slate-50 p-3.5 text-sm">
                         <div><p className="text-xs text-slate-500">Volume</p><p className="font-medium">{Number(r.volume).toLocaleString()} {r.unit}</p></div>
-                        <div><p className="text-xs text-slate-500">Total value</p><p className="font-semibold">{formatPeso(r.total_value)}</p></div>
                         <div><p className="text-xs text-slate-500">Price per kg</p><p className="font-medium">{r.price_per_kg ? formatPeso(r.price_per_kg) : dash}</p></div>
+                        <div><p className="text-xs text-slate-500">Total value</p><p className="font-semibold">{formatPeso(r.total_value)}</p></div>
                         <div><p className="text-xs text-slate-500">Broker</p><p className="break-words font-medium">{val(r.broker)}</p></div>
                         <div><p className="text-xs text-slate-500">Registered owner</p><p className="break-words font-medium">{val(r.boat_owner)}</p></div>
                         <div><p className="text-xs text-slate-500">Fishing gear</p><p className="break-words font-medium">{val(r.fishing_gear)}</p></div>
                       </div>}
-                      {canEdit && <ReviewActions status={r.status} onEdit={() => setEditing(r)} onApprove={isAdmin ? () => review(r, "approved") : undefined} onReject={isAdmin ? () => setRejecting(r) : undefined} onDelete={isAdmin ? () => setDeleting(r) : undefined} labelled />}
+                      {canEdit && <div className="border-t border-slate-100 pt-3"><ReviewActions status={r.status} onEdit={() => setEditing(r)} onApprove={isAdmin ? () => review(r, "approved") : undefined} onReject={isAdmin ? () => setRejecting(r) : undefined} onDelete={isAdmin ? () => setDeleting(r) : undefined} labelled /></div>}
                     </li>
                     );
                   })}
@@ -1913,12 +1880,12 @@ export default function LandingsPage() {
                             className={`${th} ${i === 0 ? "pl-6" : ""} ${c.right ? "text-right" : ""}`}
                           />
                         ))}
-                        {canEdit && <th className={`${th} pr-6 text-right`}>Actions</th>}
+                        {canEdit && <th className={`${th} sticky right-0 z-20 border-l border-slate-200 bg-slate-50 pr-6 text-right`}>Actions</th>}
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
                       {visibleRecords.map((r) => (
-                        <tr key={r.id} className="hover:bg-slate-50">
+                        <tr key={r.id} className="group hover:bg-slate-50">
                           {recordCols.map((c, i) => (
                             <td
                               key={c.label}
@@ -1928,7 +1895,7 @@ export default function LandingsPage() {
                             </td>
                           ))}
                           {canEdit && (
-                            <td className={`${td} pr-6 text-right`}>
+                            <td className={`${td} sticky right-0 z-10 border-l border-slate-200 bg-white pr-6 text-right group-hover:bg-slate-50`}>
                               <ReviewActions
                                 status={r.status}
                                 onEdit={() => setEditing(r)}
@@ -2306,7 +2273,7 @@ export default function LandingsPage() {
               </div>
               <div className="min-w-0">
                 <h2 id="delete-title" className="text-lg font-semibold text-slate-900">
-                  Delete this landing?
+                  Are you sure you want to delete this record?
                 </h2>
                 <p className="mt-1 text-sm text-slate-600">
                   {Number(deleting.trip_items) > 1

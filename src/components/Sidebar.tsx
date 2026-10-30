@@ -110,9 +110,9 @@ export default function Sidebar({ mobileOpen, collapsed, onMobileClose, onMobile
     const tenantMenuId = drawer ? "tenant-groups-drawer" : "tenant-groups-sidebar";
 
     return (
-      <div className="flex h-full min-h-0 flex-col bg-[linear-gradient(165deg,rgba(20,65,94,0.98)_0%,rgba(14,50,75,0.98)_48%,rgba(8,31,48,0.99)_100%)] text-white backdrop-blur-xl">
+      <div className="flex h-full min-h-0 flex-col overflow-visible bg-[linear-gradient(165deg,rgba(20,65,94,0.98)_0%,rgba(14,50,75,0.98)_48%,rgba(8,31,48,0.99)_100%)] text-white backdrop-blur-xl">
         <div className={`relative flex min-h-[5.25rem] items-center border-b border-white/10 ${compact ? "justify-center px-3" : "px-5"}`}>
-          <Logo compact={compact} />
+          {!compact && <Logo />}
           {drawer && (
             <button
               type="button"
@@ -129,7 +129,7 @@ export default function Sidebar({ mobileOpen, collapsed, onMobileClose, onMobile
               onClick={onToggleCollapse}
               aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
               title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-              className="absolute -right-3 top-1/2 z-10 grid h-7 w-7 -translate-y-1/2 place-items-center rounded-full border border-slate-200/80 bg-white text-[#12344d] shadow-md transition-[color,background-color,transform] duration-200 hover:scale-105 hover:bg-sky-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400 motion-reduce:transition-none"
+              className={`absolute top-1/2 z-[60] grid h-8 w-8 -translate-y-1/2 place-items-center rounded-full border-2 border-white bg-white text-[#12344d] shadow-[0_3px_10px_rgba(8,30,50,0.28)] transition-[color,background-color,transform] duration-200 hover:scale-105 hover:bg-sky-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400 motion-reduce:transition-none ${compact ? "left-1/2 -translate-x-1/2" : "right-2"}`}
             >
               {collapsed ? <PanelLeftOpen size={15} /> : <PanelLeftClose size={15} />}
             </button>
@@ -213,7 +213,7 @@ export default function Sidebar({ mobileOpen, collapsed, onMobileClose, onMobile
   return (
     <>
       <aside
-        className={`fixed inset-y-0 left-0 z-30 hidden border-r border-[#0b263a]/80 shadow-[10px_0_35px_-28px_rgba(8,30,50,0.7)] transition-[width] duration-300 ease-out motion-reduce:transition-none lg:block ${
+        className={`fixed inset-y-0 left-0 z-30 hidden overflow-visible border-r border-[#0b263a]/80 shadow-[10px_0_35px_-28px_rgba(8,30,50,0.7)] transition-[width] duration-300 ease-out motion-reduce:transition-none lg:block ${
           collapsed ? "w-20" : "w-[15.5rem]"
         }`}
       >

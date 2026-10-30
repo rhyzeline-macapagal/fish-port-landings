@@ -3,7 +3,9 @@ require_once dirname($_SERVER['SCRIPT_FILENAME']) . '/config.php';
 ini_set('display_errors', '0');
 
 $origin = $_SERVER['HTTP_ORIGIN'] ?? '';
-if (in_array($origin, ALLOWED_ORIGINS, true)) {
+$originAllowed = in_array($origin, ALLOWED_ORIGINS, true)
+  || (bool)preg_match('/^https:\/\/[a-z0-9-]+\.vercel\.app$/i', $origin);
+if ($originAllowed) {
   header("Access-Control-Allow-Origin: $origin");
   header('Vary: Origin');
 }
