@@ -5,6 +5,7 @@ import { Check, ChevronDown, Fish, Plus, Ship, Trash2, Truck } from "lucide-reac
 import { api, formatPeso } from "@/lib/api";
 import Modal from "@/components/Modal";
 import { saveLookup, useLookups } from "@/lib/lookups";
+import { formatSpeciesName, HIPON_SPECIES } from "@/lib/species";
 
 /* One input style for every field: solid white, visible border, larger text, clear focus ring. */
 const inputCls =
@@ -434,12 +435,18 @@ export default function NewLandingModal({ onClose, onSaved }: { onClose: () => v
       ? speciesRecords
       : saved.species.map((localName) => ({ local_name: localName, other_names: null, common_name: null }));
     const seen = new Set<string>();
-    return records
-      .map((record) => ({
-        localName: clean(record.local_name ?? ""),
-        otherNames: clean(record.other_names ?? ""),
-        commonName: clean(record.common_name ?? ""),
-      }))
+    return [
+      ...records,
+      ...HIPON_SPECIES.map((localName) => ({ local_name: localName, other_names: null, common_name: null })),
+    ]
+      .map((record) => {
+        const localName = clean(record.local_name ?? "");
+        return {
+          localName: formatSpeciesName(localName),
+          otherNames: clean(record.other_names ?? ""),
+          commonName: clean(record.common_name ?? ""),
+        };
+      })
       .filter((option) => {
         const key = option.localName.toLowerCase();
         if (!key || seen.has(key)) return false;
@@ -732,7 +739,7 @@ export default function NewLandingModal({ onClose, onSaved }: { onClose: () => v
                   </div>
 
                   <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-                    <Field label="Species" htmlFor={`species-${i}`} required>
+                    <Field label="Species" htmlFor={`species-${i}`} required hint="SUGPO, BUKIK, OSBON, SUAHE, GULUDAN, and KUAKIT are classified as HIPON in dashboard summaries.">
                       <Combobox
                         id={`species-${i}`}
                         required

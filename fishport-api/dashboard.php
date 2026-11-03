@@ -4,15 +4,21 @@ auth_user(['admin', 'encoder', 'viewer']);
 
 $pdo = db();
 $vol = "CASE WHEN unit = 'ton' THEN volume * 1000 ELSE volume END";
+// Preserve individual species on landings; combine shrimp in overall reporting.
+$speciesGroup = "CASE WHEN LOWER(TRIM(species)) IN
+  ('hipon', 'sugpo', 'bukik', 'osbon', 'suahe', 'guludan', 'kuakit',
+   'sugpo (hipon)', 'bukik (hipon)', 'osbon (hipon)', 'suahe (hipon)',
+   'guludan (hipon)', 'kuakit (hipon)')
+  THEN 'HIPON' ELSE species END";
 $tz  = new DateTimeZone('Asia/Manila');
 
 // Totals for one date range (rejected landings excluded)
-function fp_period_totals(PDO $pdo, string $vol, array $r): array {
+function fp_period_totals(PDO $pdo, string $vol, string $speciesGroup, array $r): array {
   $st = $pdo->prepare(
     "SELECT COUNT(*) AS total_landings,
             COALESCE(SUM($vol), 0) AS total_volume,
             COALESCE(SUM(total_value), 0) AS total_value,
-            COUNT(DISTINCT species) AS species_count
+            COUNT(DISTINCT $speciesGroup) AS species_count
      FROM fp_landings
      WHERE status <> 'rejected' AND landing_date BETWEEN ? AND ?"
   );
@@ -73,8 +79,8 @@ if (!in_array($thisYear, $years, true)) {
 }
 
 // Totals (current + previous period)
-$out  = fp_period_totals($pdo, $vol, $range);
-$out['prev'] = fp_period_totals($pdo, $vol, $prevRange);
+$out  = fp_period_totals($pdo, $vol, $speciesGroup, $range);
+$out['prev'] = fp_period_totals($pdo, $vol, $speciesGroup, $prevRange);
 
 // The record coverage range explains a new comparison period when the
 // previous period has no records.
@@ -128,13 +134,24 @@ $out['period_days'] = $start->diff($end)->days + 1;
 
 // Volume by species (all species)
 $st = $pdo->prepare(
-  "SELECT species, SUM($vol) AS volume
+  "SELECT $speciesGroup AS species, SUM($vol) AS volume
    FROM fp_landings
    WHERE status <> 'rejected' AND landing_date BETWEEN ? AND ?
-   GROUP BY species ORDER BY volume DESC"
+   GROUP BY $speciesGroup ORDER BY volume DESC"
 );
 $st->execute($range);
 $out['by_species'] = $st->fetchAll();
+
+// Individual shrimp names are only shown when the HIPON group is opened.
+$st = $pdo->prepare(
+  "SELECT UPPER(TRIM(species)) AS species, SUM($vol) AS volume
+   FROM fp_landings
+   WHERE status <> 'rejected' AND landing_date BETWEEN ? AND ?
+     AND ($speciesGroup) = 'HIPON'
+   GROUP BY UPPER(TRIM(species)) ORDER BY volume DESC"
+);
+$st->execute($range);
+$out['hipon_species'] = $st->fetchAll();
 
 // Month-by-month totals for the whole selected year (chart, sparklines, month chips)
 $st = $pdo->prepare(

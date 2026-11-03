@@ -53,7 +53,7 @@ if ($method === 'GET') {
 }
 
 if ($method === 'POST') {
-  $user = auth_user(['admin', 'encoder']);
+  auth_user(['admin', 'encoder']);
   $data = clean_species(body());
   db()->prepare(
     'INSERT INTO fp_species (name, other_names, english_name, scientific_name, notes)

@@ -7,6 +7,7 @@ import { inputCls } from "@/components/ui";
 import ExportMenu, { type ExportKind } from "@/components/ExportMenu";
 import Modal from "@/components/Modal";
 import { useAuth } from "@/context/AuthContext";
+import { useEntryModal } from "@/context/EntryModalContext";
 
 type SpeciesRecord = {
   id?: number | string;
@@ -45,6 +46,7 @@ function loadSpecies(signal: AbortSignal) {
 
 export default function SpeciesPage() {
   const { user } = useAuth();
+  const { showToast } = useEntryModal();
   const canAdd = user?.role === "admin" || user?.role === "encoder";
   const canEdit = user?.role === "admin";
   const canDelete = user?.role === "admin";
@@ -113,6 +115,7 @@ export default function SpeciesPage() {
         ? current.map((record) => record.id === saved.id ? saved : record)
         : [...current, saved].sort((a, b) => (a.local_name ?? "").localeCompare(b.local_name ?? "")));
       setFormOpen(false);
+      if (!editing?.id) showToast("Species Added!");
     } catch (cause) {
       setFormError(cause instanceof Error ? cause.message : "Could not save species.");
     } finally {

@@ -13,6 +13,7 @@ import StatusBadge from "@/components/StatusBadge";
 import ExportMenu, { type ExportKind } from "@/components/ExportMenu";
 import AnimatedSelect from "@/components/AnimatedSelect";
 import type { Report } from "@/lib/export"; // type only: the export library itself loads on demand
+import { formatSpeciesName, groupSpeciesVolumes, speciesClassification } from "@/lib/species";
 
 /* ------------------------------------------------------------------ */
 /* Performance notes                                                   */
@@ -61,6 +62,7 @@ interface DashboardData {
   total_value: number | string;
   pending_review: number | string;
   by_species: { species: string; volume: number | string }[];
+  hipon_species?: { species: string; volume: number | string }[];
   by_month: MonthRow[];
   prev: PrevTotals;
   compare_label: string;
@@ -244,12 +246,16 @@ const MonthlyBars = memo(function MonthlyBars({
   );
 });
 
-function SpeciesBar({ name, volume, pct, rank, reference }: { name: string; volume?: number; pct: number; rank?: number; reference?: SpeciesReference }) {
+function SpeciesBar({ name, volume, pct, rank, reference, onSelect }: { name: string; volume?: number; pct: number; rank?: number; reference?: SpeciesReference; onSelect?: () => void }) {
   return (
     <li className="grid gap-3 border-b border-slate-100 px-5 py-4 last:border-b-0 lg:grid-cols-[2rem_minmax(11rem,1.15fr)_minmax(10rem,1fr)_minmax(10rem,1fr)_minmax(11rem,1fr)_8rem] lg:items-start lg:gap-4">
       <span className="pt-0.5 text-xs tabular-nums text-slate-400">{rank}</span>
       <div className="min-w-0">
-        <p className="break-words text-sm font-semibold text-[#14263d]">{reference?.local_name || name}</p>
+        {onSelect ? (
+          <button type="button" onClick={onSelect} className="break-words text-left text-sm font-semibold text-[#0875d1] underline underline-offset-4" aria-label="View HIPON species breakdown">{name}</button>
+        ) : (
+          <p className="break-words text-sm font-semibold text-[#14263d]">{formatSpeciesName(reference?.local_name || name)}</p>
+        )}
         <span className="mt-1 block text-[10px] font-medium uppercase tracking-wide text-slate-400 lg:hidden">Local name</span>
       </div>
       <div className="min-w-0">
@@ -281,7 +287,7 @@ function DashboardSkeleton({ className = "h-64" }: { className?: string }) {
   );
 }
 
-function SpeciesDonut({ slices, total }: { slices: SpeciesSlice[]; total: number }) {
+function SpeciesDonut({ slices, total, onHiponClick }: { slices: SpeciesSlice[]; total: number; onHiponClick: () => void }) {
   const gradient = slices.map((slice, index) => {
     const start = slices.slice(0, index).reduce((sum, item) => sum + item.percentage, 0);
     const end = start + slice.percentage;
@@ -307,7 +313,11 @@ function SpeciesDonut({ slices, total }: { slices: SpeciesSlice[]; total: number
         {slices.map((slice) => (
           <li key={slice.name} className="flex items-center gap-2 text-[10px]">
             <span className="h-2 w-2 shrink-0 rounded-sm" style={{ background: slice.color }} />
-            <span className="min-w-0 flex-1 truncate font-medium text-slate-700">{slice.name}</span>
+            {slice.name === "HIPON" ? (
+              <button type="button" onClick={onHiponClick} className="min-w-0 flex-1 truncate text-left font-medium text-[#0875d1] underline underline-offset-4" aria-label="View HIPON species breakdown">HIPON</button>
+            ) : (
+              <span className="min-w-0 flex-1 truncate font-medium text-slate-700">{slice.name}</span>
+            )}
             <span className="shrink-0 tabular-nums text-slate-500">{slice.percentage.toFixed(0)}%</span>
           </li>
         ))}
@@ -327,7 +337,7 @@ export default function DashboardPage() {
   const [year, setYear] = useState(() => String(new Date().getFullYear()));
   const [month, setMonth] = useState("0"); // "0" = all months
   const [years, setYears] = useState<number[]>([]);
-  const [showAllSpecies, setShowAllSpecies] = useState(false);
+  const [speciesView, setSpeciesView] = useState<"all" | "hipon" | null>(null);
   const [speciesReferences, setSpeciesReferences] = useState<SpeciesReference[]>([]);
 
   // Cache responses per year+month. Cleared whenever a landing is added/edited (version changes).
@@ -390,11 +400,11 @@ export default function DashboardPage() {
 
   // Close the species popup with Esc
   useEffect(() => {
-    if (!showAllSpecies) return;
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setShowAllSpecies(false);
+    if (!speciesView) return;
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setSpeciesView(null);
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [showAllSpecies]);
+  }, [speciesView]);
 
   const m = Number(month);
   const periodLabel = m ? `${MONTHS[m - 1]} ${year}` : year;
@@ -407,13 +417,25 @@ export default function DashboardPage() {
 
   // Derived data (memoized so month/year toggles don't recompute everything)
   const species = useMemo<SpeciesRow[]>(
-    () => (data?.by_species ?? []).map((s) => ({ name: s.species, volume: Number(s.volume) })),
+    () => groupSpeciesVolumes(data?.by_species ?? []),
     [data]
   );
+  const hiponSpecies = useMemo<SpeciesRow[]>(() => {
+    const totals = new Map<string, number>();
+    const rows = data?.hipon_species ?? (data?.by_species ?? []).filter((row) => speciesClassification(row.species) === "HIPON");
+    rows.forEach((row) => {
+      const name = row.species.trim().toUpperCase() === "HIPON" ? "HIPON (UNSPECIFIED)" : formatSpeciesName(row.species);
+      totals.set(name, (totals.get(name) ?? 0) + Number(row.volume));
+    });
+    return [...totals].map(([name, volume]) => ({ name, volume })).sort((a, b) => b.volume - a.volume);
+  }, [data]);
+  const popupSpecies = speciesView === "hipon" ? hiponSpecies : species;
+  const popupTotal = popupSpecies.reduce((sum, row) => sum + row.volume, 0);
+  const popupTitle = speciesView === "hipon" ? `HIPON species in ${periodLabel}` : `All species in ${periodLabel}`;
   const speciesReferenceByName = useMemo(() => {
     const references = new Map<string, SpeciesReference>();
     speciesReferences.forEach((reference) => {
-      if (reference.local_name?.trim()) references.set(reference.local_name.trim().toLocaleLowerCase(), reference);
+      if (reference.local_name?.trim()) references.set(formatSpeciesName(reference.local_name).toLocaleLowerCase(), reference);
     });
     return references;
   }, [speciesReferences]);
@@ -527,7 +549,12 @@ export default function DashboardPage() {
             { header: "Volume (kg)", format: "decimal" },
             { header: "Share", format: "percent" },
           ],
-          rows: species.map((s) => [s.name, s.volume, pct(s.volume)]),
+          rows: species.flatMap((s) => [
+            [s.name, s.volume, pct(s.volume)],
+            ...(s.name === "HIPON"
+              ? hiponSpecies.map((type) => [`    - ${type.name}`, type.volume, pct(type.volume)])
+              : []),
+          ]),
           totals: ["Total", speciesTotal, species.length ? 100 : 0],
         },
         {
@@ -803,7 +830,7 @@ export default function DashboardPage() {
           ) : species.length === 0 ? (
             <Empty icon={Fish} title="Nothing to show" text="Shares appear after the first landing." height="h-56" />
           ) : (
-            <SpeciesDonut slices={speciesSlices} total={speciesTotal} />
+            <SpeciesDonut slices={speciesSlices} total={speciesTotal} onHiponClick={() => setSpeciesView("hipon")} />
           )}
         </div>
 
@@ -811,8 +838,8 @@ export default function DashboardPage() {
           <CardHeader
             title="Top 6 Species"
             subtitle={`Highest volume in ${periodLabel}`}
-            right={species.length > 6 ? (
-              <button type="button" onClick={() => setShowAllSpecies(true)} className="shrink-0 text-xs font-semibold text-[#0875d1] hover:text-[#1a8cc7]">View all</button>
+            right={species.length > 0 ? (
+              <button type="button" onClick={() => setSpeciesView("all")} className="shrink-0 text-xs font-semibold text-[#0875d1] hover:text-[#1a8cc7]">View all</button>
             ) : undefined}
           />
           {loading ? (
@@ -825,7 +852,11 @@ export default function DashboardPage() {
                 <li key={item.name} className="flex items-center gap-3 py-2.5">
                   <span className={`grid h-6 w-6 shrink-0 place-items-center rounded-full text-[10px] font-semibold ${index < 3 ? "bg-amber-50 text-amber-700" : "bg-slate-100 text-slate-600"}`}>{index + 1}</span>
                   <Fish size={17} className="shrink-0 text-[#1a8cc7]" aria-hidden="true" />
-                  <span className="min-w-0 flex-1 truncate text-xs font-medium text-slate-700">{item.name}</span>
+                  {item.name === "HIPON" ? (
+                    <button type="button" onClick={() => setSpeciesView("hipon")} className="min-w-0 flex-1 truncate text-left text-xs font-medium text-[#0875d1] underline underline-offset-4" aria-label="View HIPON species breakdown">HIPON</button>
+                  ) : (
+                    <span className="min-w-0 flex-1 truncate text-xs font-medium text-slate-700">{item.name}</span>
+                  )}
                   <span className="shrink-0 text-[11px] font-semibold tabular-nums text-[#14263d]">{Math.round(item.volume).toLocaleString()} kg</span>
                 </li>
               ))}
@@ -869,7 +900,7 @@ export default function DashboardPage() {
                       <td className="whitespace-nowrap px-5 py-3 text-slate-600">{formatDate(record.landing_date)}</td>
                       <td className="px-3 py-3 font-medium text-[#14263d]">{record.boat_name}</td>
                       <td className="px-3 py-3 text-slate-600">{record.origin || "-"}</td>
-                      <td className="px-3 py-3 text-slate-700">{record.species}</td>
+                      <td className="px-3 py-3 text-slate-700">{speciesClassification(record.species) === "HIPON" ? <button type="button" onClick={() => setSpeciesView("hipon")} className="font-medium text-[#0875d1] underline underline-offset-4">HIPON</button> : record.species}</td>
                       <td className="whitespace-nowrap px-3 py-3 text-right tabular-nums text-slate-700">{Number(record.volume).toLocaleString()} {record.unit}</td>
                       <td className="whitespace-nowrap px-3 py-3 text-right font-semibold tabular-nums text-[#14263d]">{formatPeso(record.total_value)}</td>
                       <td className="px-5 py-3"><StatusBadge status={record.status} /></td>
@@ -889,7 +920,7 @@ export default function DashboardPage() {
                     <StatusBadge status={record.status} />
                   </div>
                   <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 text-[11px]">
-                    <div><dt className="text-slate-400">Species</dt><dd className="mt-0.5 truncate font-medium text-slate-700">{record.species}</dd></div>
+                    <div><dt className="text-slate-400">Species</dt><dd className="mt-0.5 truncate font-medium text-slate-700">{speciesClassification(record.species) === "HIPON" ? <button type="button" onClick={() => setSpeciesView("hipon")} className="text-[#0875d1] underline underline-offset-4">HIPON</button> : record.species}</dd></div>
                     <div><dt className="text-slate-400">Origin</dt><dd className="mt-0.5 truncate font-medium text-slate-700">{record.origin || "-"}</dd></div>
                     <div><dt className="text-slate-400">Volume</dt><dd className="mt-0.5 font-medium tabular-nums text-slate-700">{Number(record.volume).toLocaleString()} {record.unit}</dd></div>
                     <div><dt className="text-slate-400">Total value</dt><dd className="mt-0.5 font-semibold tabular-nums text-[#14263d]">{formatPeso(record.total_value)}</dd></div>
@@ -902,29 +933,30 @@ export default function DashboardPage() {
       </section>
 
       {/* All species popup (only mounted while open) */}
-      {showAllSpecies && (
+      {speciesView && (
         <div
           className="fixed inset-0 z-50 grid place-items-center bg-slate-900/50 p-4"
-          onClick={() => setShowAllSpecies(false)}
+          onClick={() => setSpeciesView(null)}
         >
           <div
             role="dialog"
             aria-modal="true"
-            aria-label={`All species in ${periodLabel}`}
+            aria-label={popupTitle}
             className={`${card} flex max-h-[90vh] w-full max-w-6xl flex-col overflow-hidden shadow-2xl`}
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-start justify-between gap-4 border-b border-slate-200 bg-white px-5 py-5 sm:px-7">
               <div>
                 <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#0875d1]">Species breakdown</p>
-                <h2 className="mt-1 text-lg font-semibold text-slate-900">All species in {periodLabel}</h2>
+                <h2 className="mt-1 text-lg font-semibold text-slate-900">{popupTitle}</h2>
+                {speciesView === "hipon" && <button type="button" onClick={() => setSpeciesView("all")} className="mt-2 text-xs font-semibold text-[#0875d1] hover:underline">Back to all species</button>}
                 <div className="mt-2 flex flex-wrap gap-2 text-xs text-slate-500">
-                  <span className="rounded-full bg-slate-100 px-2.5 py-1">{species.length} species</span>
-                  <span className="rounded-full bg-slate-100 px-2.5 py-1">{Math.round(speciesTotal).toLocaleString()} kg total</span>
+                  <span className="rounded-full bg-slate-100 px-2.5 py-1">{popupSpecies.length} {speciesView === "hipon" ? "entries" : "species"}</span>
+                  <span className="rounded-full bg-slate-100 px-2.5 py-1">{Math.round(popupTotal).toLocaleString()} kg total</span>
                 </div>
               </div>
               <button
-                onClick={() => setShowAllSpecies(false)}
+                onClick={() => setSpeciesView(null)}
                 aria-label="Close"
                 className="grid h-8 w-8 shrink-0 place-items-center rounded-md text-slate-600 hover:bg-slate-100 hover:text-slate-900"
               >
@@ -936,17 +968,19 @@ export default function DashboardPage() {
               <span>#</span><span>Local name</span><span>Other names</span><span>Common name</span><span>Scientific name</span><span className="text-right">Volume / share</span>
             </div>
             <ul className="overflow-y-auto">
-              {species.map((s, i) => (
+              {popupSpecies.map((s, i) => (
                 <SpeciesBar
                   key={s.name}
                   name={s.name}
                   volume={s.volume}
-                  pct={speciesTotal ? (s.volume / speciesTotal) * 100 : 0}
+                  pct={popupTotal ? (s.volume / popupTotal) * 100 : 0}
                   rank={i + 1}
                   reference={speciesReferenceByName.get(s.name.trim().toLocaleLowerCase())}
+                  onSelect={speciesView === "all" && s.name === "HIPON" ? () => setSpeciesView("hipon") : undefined}
                 />
               ))}
             </ul>
+            {speciesView === "hipon" && popupSpecies.length === 0 && <p className="px-5 py-8 text-sm text-slate-500">No HIPON species breakdown is available for this period.</p>}
           </div>
         </div>
       )}
