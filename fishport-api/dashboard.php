@@ -36,8 +36,19 @@ if ($year < 2000 || $year > 2100) $year = $thisYear;
 $month = (int)($_GET['month'] ?? 0);
 if ($month < 1 || $month > 12) $month = 0;
 
+// A day is only meaningful within a selected month and year.
+$day = (int)($_GET['day'] ?? 0);
+if ($day !== 0 && (!$month || !checkdate($month, $day, $year))) {
+  json_out(['error' => 'Choose a valid day within the selected month.'], 422);
+}
+
 // Current period and the period it is compared against
-if ($month) {
+if ($day) {
+  $start       = new DateTimeImmutable(sprintf('%d-%02d-%02d', $year, $month, $day), $tz);
+  $end         = $start;
+  $prevStart   = $start->modify('-1 day');
+  $prevFullEnd = $prevStart;
+} elseif ($month) {
   $start       = new DateTimeImmutable(sprintf('%d-%02d-01', $year, $month), $tz);
   $end         = $start->modify('last day of this month');
   $prevStart   = $start->modify('-1 month');
@@ -58,7 +69,9 @@ $prevEnd = min($prevStart->add($start->diff($curEnd)), $prevFullEnd);
 $range     = [$start->format('Y-m-d'), $end->format('Y-m-d')];
 $prevRange = [$prevStart->format('Y-m-d'), $prevEnd->format('Y-m-d')];
 
-if ($month) {
+if ($day) {
+  $compareLabel = 'vs ' . $prevStart->format('M j, Y');
+} elseif ($month) {
   $compareLabel = $partial
     ? 'vs ' . $prevStart->format('M j') . '-' . $prevEnd->format('j, Y')
     : 'vs ' . $prevStart->format('F Y');
@@ -187,6 +200,7 @@ $out['recent'] = $st->fetchAll();
 
 $out['year']          = $year;
 $out['month']         = $month;
+$out['day']           = $day;
 $out['compare_label'] = $compareLabel;
 $out['years']         = $years;
 

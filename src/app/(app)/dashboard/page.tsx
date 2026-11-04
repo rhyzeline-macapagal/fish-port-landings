@@ -20,7 +20,7 @@ import { formatSpeciesName, groupSpeciesVolumes, speciesClassification } from "@
 /* - No chart library: bars and sparklines are plain CSS / tiny SVG.   */
 /* - No blur blobs, backdrop-filter or gradients: cheap to paint.      */
 /* - PDF/Excel export code is loaded only when someone clicks Export.  */
-/* - Responses are cached per year/month, so revisiting is instant.    */
+/* - Responses are cached per year/month/day for quick revisiting.     */
 /* - Derived data is memoized; cards only re-render when props change. */
 /* ------------------------------------------------------------------ */
 
@@ -71,6 +71,7 @@ interface DashboardData {
   recent: Landing[];
   year: number;
   month: number;
+  day?: number;
   years: number[];
   by_route: {
     land: { landings: number | string; value: number | string; weight: number | string };
@@ -177,13 +178,15 @@ function Empty({ icon: Icon, title, text, height = "h-56" }: { icon: typeof Fish
 
 // Pure-CSS monthly bars. Each bar is a button: click to filter by that month.
 const MonthlyBars = memo(function MonthlyBars({
-  data, selected, onSelect,
+  data, selected, onSelect, metric = "volume",
 }: {
   data: MonthPoint[];
   selected: number;
   onSelect: (n: number) => void;
+  metric?: "volume" | "amount";
 }) {
-  const rawMax = Math.max(...data.map((d) => d.volume), 1);
+  const rawMax = Math.max(...data.map((d) => d[metric]), 1);
+  const formatValue = metric === "amount" ? formatPeso : formatKg;
   const magnitude = 10 ** Math.floor(Math.log10(rawMax));
   const normalized = rawMax / magnitude;
   const nice = normalized <= 1 ? 1 : normalized <= 2 ? 2 : normalized <= 5 ? 5 : 10;
@@ -196,9 +199,9 @@ const MonthlyBars = memo(function MonthlyBars({
   };
 
   return (
-    <div className="flex h-full min-w-0" role="group" aria-label="Monthly landing volume in kilograms">
+    <div className="flex h-full min-w-0" role="group" aria-label={metric === "amount" ? "Monthly landing value in Philippine pesos" : "Monthly landing volume in kilograms"}>
       <div className="flex w-10 shrink-0 flex-col justify-between pb-7 pr-2 text-right text-[9px] tabular-nums text-slate-400 sm:w-12 sm:text-[10px]">
-        {tickLabels.map((tick) => <span key={tick}>{compact(tick)}</span>)}
+        {tickLabels.map((tick) => <span key={tick}>{metric === "amount" ? "₱" : ""}{compact(tick)}</span>)}
       </div>
       <div className="relative flex min-w-0 flex-1 gap-1 sm:gap-2">
         <div className="pointer-events-none absolute inset-x-0 bottom-7 top-0 flex flex-col justify-between" aria-hidden="true">
@@ -207,30 +210,33 @@ const MonthlyBars = memo(function MonthlyBars({
         {data.map((d, i) => {
           const active = selected === i + 1;
           const dim = selected !== 0 && !active;
-          const percentage = d.volume > 0 ? Math.max((d.volume / max) * 100, 2) : 0;
+          const value = d[metric];
+          const percentage = value > 0 ? Math.max((value / max) * 100, 2) : 0;
           return (
             <button
               key={d.label}
               type="button"
               onClick={() => onSelect(i + 1)}
               aria-pressed={active}
-              aria-label={`${d.full}: ${formatKg(d.volume)} across ${d.landings.toLocaleString()} landings`}
+              aria-label={`${d.full}: ${formatValue(value)} across ${d.landings.toLocaleString()} landings`}
               className="group relative z-10 flex min-w-0 flex-1 flex-col focus-visible:outline-none"
             >
               <span className="relative flex flex-1 items-end justify-center">
                 <span
                   className={`relative w-[72%] max-w-8 rounded-t-sm transition-colors group-focus-visible:ring-2 group-focus-visible:ring-[#0875d1] ${
-                    d.volume === 0
+                    value === 0
                       ? "h-px bg-slate-300"
                       : dim
                         ? "bg-sky-200 group-hover:bg-sky-300"
-                        : "bg-[#48aaf0] group-hover:bg-[#0875d1]"
+                        : metric === "amount"
+                          ? "bg-emerald-400 group-hover:bg-emerald-600"
+                          : "bg-[#48aaf0] group-hover:bg-[#0875d1]"
                   }`}
-                  style={d.volume > 0 ? { height: `${percentage}%` } : undefined}
+                  style={value > 0 ? { height: `${percentage}%` } : undefined}
                 >
-                  {d.volume > 0 && (
+                  {value > 0 && (
                     <span className="pointer-events-none absolute -top-11 left-1/2 z-20 hidden -translate-x-1/2 whitespace-nowrap rounded-md bg-[#12344d] px-2 py-1 text-[9px] font-medium text-white opacity-0 shadow-lg transition-opacity group-hover:block group-hover:opacity-100 group-focus-visible:block group-focus-visible:opacity-100 sm:text-[10px]">
-                      {formatKg(d.volume)}
+                      {formatValue(value)}
                     </span>
                   )}
                 </span>
@@ -336,11 +342,12 @@ export default function DashboardPage() {
   const [fetching, setFetching] = useState(false);
   const [year, setYear] = useState(() => String(new Date().getFullYear()));
   const [month, setMonth] = useState("0"); // "0" = all months
+  const [day, setDay] = useState("0"); // "0" = all days in the month
   const [years, setYears] = useState<number[]>([]);
   const [speciesView, setSpeciesView] = useState<"all" | "hipon" | null>(null);
   const [speciesReferences, setSpeciesReferences] = useState<SpeciesReference[]>([]);
 
-  // Cache responses per year+month. Cleared whenever a landing is added/edited (version changes).
+  // Cache responses per year+month+day. Cleared whenever a landing changes.
   const cache = useRef(new Map<string, DashboardData>());
   const cachedVersion = useRef(version);
 
@@ -350,7 +357,7 @@ export default function DashboardPage() {
       cachedVersion.current = version;
     }
 
-    const key = `${year}:${month}`;
+    const key = `${year}:${month}:${day}`;
     const hit = cache.current.get(key);
     if (hit) {
       setData(hit);
@@ -362,11 +369,14 @@ export default function DashboardPage() {
     let ignore = false;
     setError("");
     setFetching(true);
-    api<DashboardData>(`dashboard.php?year=${year}&month=${month}`)
+    api<DashboardData>(`dashboard.php?year=${year}&month=${month}&day=${day}`)
       .then(async (d) => {
         if (ignore) return;
         if (!d.by_route?.land || !d.by_route?.sea || !d.period_days) {
           throw new Error("Dashboard analytics data is unavailable. Please deploy the latest dashboard API.");
+        }
+        if (Number(day) && Number(d.day) !== Number(day)) {
+          throw new Error("Daily reporting is currently unavailable.");
         }
         if (!d.record_start_date || !d.record_end_date) {
           const [firstRows, lastRows] = await Promise.all([
@@ -379,14 +389,20 @@ export default function DashboardPage() {
             record_end_date: lastRows[0]?.landing_date ?? null,
           };
         }
+        if (ignore) return;
         cache.current.set(key, d);
         setData(d);
         if (d.years?.length) setYears(d.years);
       })
-      .catch((e) => !ignore && setError(e.message))
+      .catch((e) => {
+        if (!ignore) {
+          setData(null);
+          setError(e.message);
+        }
+      })
       .finally(() => !ignore && setFetching(false));
     return () => { ignore = true; };
-  }, [version, year, month]);
+  }, [version, year, month, day]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -407,9 +423,10 @@ export default function DashboardPage() {
   }, [speciesView]);
 
   const m = Number(month);
-  const periodLabel = m ? `${MONTHS[m - 1]} ${year}` : year;
+  const selectedDay = Number(day);
+  const periodLabel = m ? `${MONTHS[m - 1]} ${selectedDay ? `${selectedDay}, ` : ""}${year}` : year;
   const yearOptions = years.length ? years : [Number(year)];
-  const loading = !data && !error;
+  const loading = fetching || (!data && !error);
   const latestLandingDate = (data?.recent ?? []).reduce((latest, record) => (
     !latest || record.landing_date > latest ? record.landing_date : latest
   ), "");
@@ -478,6 +495,7 @@ export default function DashboardPage() {
     [monthly]
   );
   const noMonthlyData = monthly.every((r) => r.volume === 0);
+  const noMonthlyValue = monthly.every((r) => r.amount === 0);
 
   const recent = data?.recent ?? [];
   const pending = num(data?.pending_review);
@@ -519,7 +537,11 @@ export default function DashboardPage() {
   const periodDays = Math.max(1, num(data?.period_days));
   const averageDaily = (value: number) => value / periodDays;
 
-  const toggleMonth = (n: number) => setMonth((prevMonth) => (prevMonth === String(n) ? "0" : String(n)));
+  function changeMonth(value: string) {
+    setMonth(value);
+    setDay("0");
+  }
+  const toggleMonth = (n: number) => changeMonth(month === String(n) ? "0" : String(n));
 
   // Exports what the dashboard shows. The export library (PDF/Excel) is loaded only now.
   async function exportDashboard(kind: ExportKind) {
@@ -611,7 +633,7 @@ export default function DashboardPage() {
         },
       ],
     };
-    const name = `dashboard_${year}${m ? "_" + String(m).padStart(2, "0") : ""}_${stamp()}`;
+    const name = `dashboard_${year}${m ? "_" + String(m).padStart(2, "0") : ""}${selectedDay ? "_" + String(selectedDay).padStart(2, "0") : ""}_${stamp()}`;
     if (kind === "xlsx") await exportXlsx(name, report);
     else await exportPdf(name, report);
   }
@@ -619,6 +641,12 @@ export default function DashboardPage() {
   const monthOptions = [
     { v: "0", l: "All months" },
     ...MONTHS.map((label, index) => ({ v: String(index + 1), l: label })),
+  ];
+  const dayOptions = [
+    { value: "0", label: "All days" },
+    ...Array.from({ length: m ? new Date(Number(year), m, 0).getDate() : 0 }, (_, index) => ({
+      value: String(index + 1), label: `Day ${index + 1}`,
+    })),
   ];
 
   return (
@@ -632,26 +660,46 @@ export default function DashboardPage() {
           <p className="mt-1 text-sm text-slate-500">Here&apos;s what&apos;s happening at Mercedes FishPort today.</p>
         </div>
 
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-center xl:justify-end">
+        <div className="flex min-w-0 flex-col gap-3 xl:items-end">
           <p className="whitespace-nowrap text-xs font-medium text-slate-500">{today}</p>
-          <div className="flex flex-wrap items-center gap-2">
-            <AnimatedSelect
-              label="Reporting year"
-              value={year}
-              options={yearOptions.map((option) => ({ value: String(option), label: String(option) }))}
-              onChange={setYear}
-              className="min-w-28"
-              align="right"
-            />
-            <AnimatedSelect
-              label="Reporting month"
-              value={month}
-              options={monthOptions.map((option) => ({ value: option.v, label: option.l }))}
-              onChange={setMonth}
-              className="min-w-32"
-              align="right"
-            />
-            <ExportMenu onExport={exportDashboard} disabled={!data} title={`Download the ${periodLabel} dashboard`} />
+          <div className="flex w-full flex-wrap items-end gap-2 xl:justify-end">
+            <div role="group" aria-label="Reporting period" className="grid w-full grid-cols-3 gap-2 sm:w-auto">
+              <div className="min-w-0 space-y-1">
+                <p className="text-xs font-medium text-slate-600">Year</p>
+                <AnimatedSelect
+                  label="Reporting year"
+                  value={year}
+                  options={yearOptions.map((option) => ({ value: String(option), label: String(option) }))}
+                  onChange={(value) => { setYear(value); setDay("0"); }}
+                  className="min-w-0 sm:min-w-28"
+                  align="left"
+                />
+              </div>
+              <div className="min-w-0 space-y-1">
+                <p className="text-xs font-medium text-slate-600">Month</p>
+                <AnimatedSelect
+                  label="Reporting month"
+                  value={month}
+                  options={monthOptions.map((option) => ({ value: option.v, label: option.l }))}
+                  onChange={changeMonth}
+                  className="min-w-0 sm:min-w-32"
+                  align="left"
+                />
+              </div>
+              <div className="min-w-0 space-y-1" title={m ? undefined : "Select a month to filter by day"}>
+                <p className="text-xs font-medium text-slate-600">Day</p>
+                <AnimatedSelect
+                  label="Reporting day"
+                  value={day}
+                  options={dayOptions}
+                  onChange={setDay}
+                  disabled={!m}
+                  className="min-w-0 sm:min-w-28"
+                  align="right"
+                />
+              </div>
+            </div>
+            <ExportMenu onExport={exportDashboard} disabled={!data || fetching || !!error} title={`Download the ${periodLabel} dashboard`} />
             {canAdd && (
               <button
                 type="button"
@@ -662,6 +710,7 @@ export default function DashboardPage() {
               </button>
             )}
           </div>
+          {!m && <p className="text-xs text-slate-500">Select a month to filter by day.</p>}
         </div>
       </section>
 
@@ -766,7 +815,7 @@ export default function DashboardPage() {
       </section>
 
       <section aria-label="Average daily landing value">
-        <CardHeader title="Average Daily Landing Value" subtitle={`Based on ${periodDays.toLocaleString()} calendar days in ${periodLabel}`} />
+        <CardHeader title="Average Daily Landing Value" subtitle={`Based on ${periodDays.toLocaleString()} calendar ${periodDays === 1 ? "day" : "days"} in ${periodLabel}`} />
         <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3 lg:gap-4">
           <KpiCard
             label="Average Daily Value - Combined"
@@ -802,10 +851,10 @@ export default function DashboardPage() {
         <div className={`${card} p-5 lg:col-span-2 xl:col-span-6`}>
           <CardHeader
             title={`Monthly Landing Volume (${year})`}
-            subtitle="Volume in kilograms. Select a bar to filter the dashboard."
+            subtitle="Full-year volume in kilograms. Select a bar to choose a month."
             right={
               m ? (
-                <button onClick={() => setMonth("0")} className="shrink-0 text-xs font-semibold text-[#0875d1] hover:text-[#1a8cc7]">Clear {MONTHS_SHORT[m - 1]}</button>
+                <button onClick={() => changeMonth("0")} className="shrink-0 text-xs font-semibold text-[#0875d1] hover:text-[#1a8cc7]">Clear {MONTHS_SHORT[m - 1]}</button>
               ) : undefined
             }
           />
@@ -820,7 +869,24 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        <div className={`${card} p-5 xl:col-span-3`}>
+        <div className={`${card} p-5 lg:col-span-2 xl:col-span-6`}>
+          <CardHeader
+            title={`Monthly Landing Value (${year})`}
+            subtitle="Full-year value in Philippine pesos. Select a bar to choose a month."
+            right={m ? <button type="button" onClick={() => changeMonth("0")} className="shrink-0 text-xs font-semibold text-[#0875d1] hover:text-[#1a8cc7]">Clear {MONTHS_SHORT[m - 1]}</button> : undefined}
+          />
+          <div className="mt-5 h-56 sm:h-64">
+            {loading ? (
+              <DashboardSkeleton className="h-full" />
+            ) : noMonthlyValue ? (
+              <Empty icon={Wallet} title="No landing value yet" text={`No landing value recorded in ${year}.`} height="h-full" />
+            ) : (
+              <MonthlyBars data={monthly} selected={m} onSelect={toggleMonth} metric="amount" />
+            )}
+          </div>
+        </div>
+
+        <div className={`${card} p-5 xl:col-span-6`}>
           <CardHeader
             title="Species Share"
             subtitle={`Share of ${periodLabel} volume`}
@@ -834,7 +900,7 @@ export default function DashboardPage() {
           )}
         </div>
 
-        <div className={`${card} p-5 xl:col-span-3`}>
+        <div className={`${card} p-5 xl:col-span-6`}>
           <CardHeader
             title="Top 6 Species"
             subtitle={`Highest volume in ${periodLabel}`}
