@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
+import { formatSpeciesName, HIPON_SPECIES } from "@/lib/species";
 
 type Names = { names: string[] };
 export type LookupType = "species" | "brokers" | "producers" | "owners";
@@ -9,7 +10,7 @@ const CACHE_TTL = 5 * 60 * 1000;
 let cached: { data: LookupData; at: number } | null = null;
 let pending: Promise<LookupData> | null = null;
 
-const emptyLookups = (): LookupData => ({ species: [], brokers: [], producers: [], owners: [] });
+const emptyLookups = (): LookupData => ({ species: [...HIPON_SPECIES], brokers: [], producers: [], owners: [] });
 
 function loadLookups() {
   if (cached && Date.now() - cached.at < CACHE_TTL) return Promise.resolve(cached.data);
@@ -22,7 +23,12 @@ function loadLookups() {
 
   pending = Promise.all([load("species"), load("brokers"), load("producers"), load("owners")])
     .then(([species, brokers, producers, owners]) => {
-      const data = { species, brokers, producers, owners };
+      const names = new Map<string, string>();
+      [...HIPON_SPECIES, ...species].map(formatSpeciesName).forEach((name) => {
+        const key = name.trim().toLowerCase();
+        if (key && !names.has(key)) names.set(key, name.trim());
+      });
+      const data = { species: [...names.values()].sort((a, b) => a.localeCompare(b)), brokers, producers, owners };
       cached = { data, at: Date.now() };
       return data;
     })

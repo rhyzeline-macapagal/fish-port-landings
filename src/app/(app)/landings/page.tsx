@@ -4,8 +4,8 @@ import { ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import {
   ArrowDown, ArrowUp, ArrowUpDown, Check, ChevronDown, ChevronLeft, ChevronRight, Clock, Download,
-  FileSpreadsheet, FileText, Layers, Loader2, Package, Pencil, Plus, RotateCcw, Scale, Search, Ship,
-  SlidersHorizontal, Trash2, Trophy, Truck, Wallet, X,
+  FileSpreadsheet, FileText, Layers, Loader2, Package, Pencil, Plus, Scale, Search, Ship,
+  Trash2, Trophy, Truck, Wallet, X,
 } from "lucide-react";
 import { api, formatDate, formatPeso, Landing } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
@@ -74,19 +74,6 @@ const PERIODS = [
   { label: "12 months", value: "year" },
 ];
 
-const SORTS = [
-  { label: "Newest first", sort: "", dir: "" },
-  { label: "Oldest first", sort: "landing_date", dir: "asc" },
-  { label: "Highest value", sort: "total_value", dir: "desc" },
-  { label: "Lowest value", sort: "total_value", dir: "asc" },
-  { label: "Largest volume", sort: "volume", dir: "desc" },
-  { label: "Smallest volume", sort: "volume", dir: "asc" },
-  { label: "Highest price per kg", sort: "price_per_kg", dir: "desc" },
-  { label: "Supplier A to Z", sort: "boat_name", dir: "asc" },
-  { label: "Broker A to Z", sort: "broker", dir: "asc" },
-  { label: "Plate number A to Z", sort: "plate_number", dir: "asc" },
-];
-
 /* Leaderboard: `key` is the ?top= value, `filter` is the filter it applies when a row is clicked. */
 const TOP_GROUPS: { key: string; label: string; filter: keyof Filters }[] = [
   { key: "vessel", label: "Producer", filter: "vessel" },
@@ -109,11 +96,6 @@ const FILTER_LABELS: Record<string, string> = {
   min_volume: "Min kg", max_volume: "Max kg", min_value: "Min value", max_value: "Max value",
   reviewed: "Review",
 };
-
-const ADVANCED_KEYS: (keyof Filters)[] = [
-  "vessel", "broker", "owner", "origin", "plate", "gear", "ground", "quality",
-  "min_volume", "max_volume", "min_value", "max_value", "reviewed", "sort",
-];
 
 /* Columns of the records export (same order as the By Sea table) */
 const RECORD_COLS: Col[] = [
@@ -610,12 +592,12 @@ export default function LandingsPage() {
   const topReq = useRef(0);
   const listReq = useRef(0);
   const listAbort = useRef<AbortController | null>(null);
+  const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [cardFilters, setCardFilters] = useState<RecordCardFilters>(EMPTY_CARD_FILTERS);
   const [recordPage, setRecordPage] = useState(1);
   const [recordPageSize, setRecordPageSize] = useState(25);
   const [expandedRows, setExpandedRows] = useState<Set<number>>(() => new Set());
   const [options, setOptions] = useState<Options>(NO_OPTIONS);
-  const [showMore, setShowMore] = useState(false);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
@@ -719,7 +701,9 @@ export default function LandingsPage() {
       const hasExtraFilters = Object.entries(f).some(([key, value]) =>
         value && key !== "year" && key !== "from" && key !== "to"
       );
-      const isDashboardScope = !hasExtraFilters && (!m || m === "0" || (!!f.from && !!f.to));
+      const isDashboardScope = !hasExtraFilters && (
+        !m || m === "0" ? !f.from && !f.to : !!f.from && !!f.to
+      );
       if (isDashboardScope) {
         const monthParam = m && m !== "0" ? `&month=${m}` : "&month=0";
         const dashboard = await api<{ total_landings: number | string; total_volume: number | string; total_value: number | string }>(
@@ -994,6 +978,19 @@ export default function LandingsPage() {
     setError("");
     setApplied(f);
     setPrev(null);
+    if (f.from && f.to && f.from > f.to) {
+      topReq.current += 1;
+      prevReq.current += 1;
+      totalsReq.current += 1;
+      setRows([]);
+      setTotals(null);
+      setTop(null);
+      setTopLoading(false);
+      setLoading(false);
+      setRefreshing(false);
+      setError("From date must be on or before To date.");
+      return;
+    }
     if (f.q.trim()) {
       // Free-text LIKE searches are the most expensive database operation.
       // Keep them to one query; rankings, totals and historical comparisons
@@ -1019,6 +1016,8 @@ export default function LandingsPage() {
       setRows(Array.from(new Map(all.map((r) => [r.id, r])).values()));
     } catch (e) {
       if (id === listReq.current && !(e instanceof DOMException && e.name === "AbortError")) {
+        setRows([]);
+        setTotals(null);
         setError(e instanceof Error && e.message !== "Failed to fetch"
           ? e.message
           : "Landings service is unavailable. Check the API deployment and connection, then try again.");
@@ -1056,7 +1055,10 @@ export default function LandingsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [version]);
 
-  useEffect(() => () => listAbort.current?.abort(), []);
+  useEffect(() => () => {
+    listAbort.current?.abort();
+    if (searchTimer.current) clearTimeout(searchTimer.current);
+  }, []);
 
   // Close the "Approve all" dialog with Esc
   useEffect(() => {
@@ -1174,13 +1176,33 @@ export default function LandingsPage() {
     }
   }
 
-  // Tabs, chips and dropdowns apply straight away; text, dates and numbers wait for Apply / Enter.
+  // Filters apply immediately; free-text search waits briefly for typing to pause.
   // `m` is the month filter that goes with this change (defaults to the current one).
   function apply(patch: Partial<Filters>, m: string = month) {
+    if (searchTimer.current) clearTimeout(searchTimer.current);
     const next = { ...filters, ...patch };
     setFilters(next);
     setMonth(m);
+    setRecordPage(1);
     load(next, m);
+  }
+
+  function search(value: string) {
+    if (searchTimer.current) clearTimeout(searchTimer.current);
+    const next = { ...filters, q: value };
+    setFilters(next);
+    setRecordPage(1);
+    const query = { ...next, q: value.trim() };
+    if (!query.q) {
+      load(query, month);
+      return;
+    }
+    searchTimer.current = setTimeout(() => load(query, month), 300);
+  }
+
+  function changeDate(key: "from" | "to", value: string) {
+    // A custom date range can span years and replaces the year/month shortcut.
+    apply({ [key]: value, year: "", period: "" }, "0");
   }
 
   // Month chips: a month is just a from/to date range inside the selected year.
@@ -1204,10 +1226,8 @@ export default function LandingsPage() {
   }
 
   function reset() {
-    setFilters(EMPTY);
-    setMonth("0");
     setTableSort(null);
-    load(EMPTY, "0");
+    apply(EMPTY, "0");
   }
 
   // Clears every filter and shows the list of all landings (all years)
@@ -1274,7 +1294,6 @@ export default function LandingsPage() {
   const activeChips = Object.entries(applied).filter(
     ([k, v]) => v && k !== "sort" && k !== "dir" && k !== "year" && !(month !== "0" && (k === "from" || k === "to"))
   );
-  const advancedCount = ADVANCED_KEYS.filter((k) => applied[k]).length;
   const topDef = TOP_GROUPS.find((g) => g.key === topGroup);
   const topMax = top ? Math.max(...top.rows.map((r) => metricNum(top.by, r)), 0) : 0;
   const yearOptions = options.years.length ? options.years : [Number(THIS_YEAR)];
@@ -1319,7 +1338,6 @@ export default function LandingsPage() {
     }`;
   const segmented = "inline-flex rounded-md bg-slate-100 p-1";
   const mobileFilterInput = `${inputCls} h-10 !py-2 text-sm sm:h-auto sm:!py-2.5`;
-  const mobileFilterButton = `${ghostBtn} h-10 !px-3 !py-2 sm:h-auto sm:!px-4 sm:!py-2.5`;
   const selectOptions = (list: string[]) => list.map((s) => <option key={s}>{s}</option>);
 
   return (
@@ -1379,12 +1397,14 @@ export default function LandingsPage() {
             }}
           />
 
-          <button
-            onClick={openNewEntry}
-            className={`${primaryBtn} col-span-2 w-full sm:w-auto`}
-          >
-            <Plus size={16} /> Record a landing
-          </button>
+          {canEdit && (
+            <button
+              onClick={openNewEntry}
+              className={`${primaryBtn} col-span-2 w-full sm:w-auto`}
+            >
+              <Plus size={16} /> Record a landing
+            </button>
+          )}
         </div>
       </section>
 
@@ -1592,122 +1612,45 @@ export default function LandingsPage() {
 
         {/* Filters */}
         <form
-          onSubmit={(e) => { e.preventDefault(); load(); }}
+          onSubmit={(e) => { e.preventDefault(); apply({}); }}
           className="border-t border-slate-200 bg-slate-50 p-4"
         >
-          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 sm:gap-3 lg:grid-cols-[1fr_1fr_1fr_1.4fr_auto]">
-            <select className={mobileFilterInput} value={filters.species} onChange={(e) => apply({ species: e.target.value })}>
-              <option value="">All species</option>
-              {selectOptions(options.species)}
-            </select>
-            <input
-              type="date"
-              aria-label="From date"
-              className={mobileFilterInput}
-              value={filters.from}
-              onChange={(e) => { setFilters({ ...filters, from: e.target.value, period: "" }); setMonth("0"); }}
-            />
-            <input
-              type="date"
-              aria-label="To date"
-              className={mobileFilterInput}
-              value={filters.to}
-              onChange={(e) => { setFilters({ ...filters, to: e.target.value, period: "" }); setMonth("0"); }}
-            />
-            <div className="relative">
+          <div className="grid grid-cols-1 items-end gap-2 sm:grid-cols-2 sm:gap-3 lg:grid-cols-[1fr_1fr_2fr]">
+            <label className="block space-y-1 text-xs font-medium text-slate-600">
+              <span>From</span>
+              <input
+                type="date"
+                aria-label="From date"
+                className={mobileFilterInput}
+                value={filters.from}
+                max={filters.to || undefined}
+                onChange={(e) => changeDate("from", e.target.value)}
+              />
+            </label>
+            <label className="block space-y-1 text-xs font-medium text-slate-600">
+              <span>To</span>
+              <input
+                type="date"
+                aria-label="To date"
+                className={mobileFilterInput}
+                value={filters.to}
+                min={filters.from || undefined}
+                onChange={(e) => changeDate("to", e.target.value)}
+              />
+            </label>
+            <div className="relative sm:col-span-2 lg:col-span-1">
               <Search size={16} className="pointer-events-none absolute left-3.5 top-3.5 text-slate-500" />
               <input
                 className={`${mobileFilterInput} pl-10 pr-10`}
-                placeholder="Search supplier, owner, broker, species, origin or plate"
+                placeholder="Search any landing record field"
                 value={filters.q}
-                onChange={(e) => setFilters({ ...filters, q: e.target.value })}
+                onChange={(e) => search(e.target.value)}
+                aria-label="Search landings"
                 aria-busy={refreshing}
               />
               {refreshing && <Loader2 size={16} className="pointer-events-none absolute right-3.5 top-3.5 animate-spin text-sky-600" />}
             </div>
-            <div className="flex gap-2">
-              <button
-                type="button"
-                onClick={() => setShowMore((v) => !v)}
-                aria-expanded={showMore}
-                className={`${mobileFilterButton} relative`}
-                title="More filters"
-              >
-                <SlidersHorizontal size={15} />
-                {advancedCount > 0 && (
-                  <span className="absolute -right-1.5 -top-1.5 grid h-5 min-w-5 place-items-center rounded-full bg-sky-600 px-1 text-[11px] font-semibold text-white">
-                    {advancedCount}
-                  </span>
-                )}
-              </button>
-              <button type="button" onClick={reset} aria-label="Reset filters" className={mobileFilterButton}>
-                <RotateCcw size={15} />
-              </button>
-              <button className={`${primaryBtn} h-10 !px-4 !py-2 sm:h-auto sm:!py-2.5`}>Apply</button>
-            </div>
           </div>
-
-          {showMore && (
-            <div className="mt-3 grid grid-cols-1 gap-2 border-t border-slate-200 pt-3 sm:grid-cols-2 sm:gap-3 lg:grid-cols-4">
-              <select aria-label="Supplier" className={mobileFilterInput} value={filters.vessel} onChange={(e) => apply({ vessel: e.target.value })}>
-                <option value="">All suppliers / vessels</option>
-                {selectOptions(options.vessels)}
-              </select>
-              <select aria-label="Broker" className={mobileFilterInput} value={filters.broker} onChange={(e) => apply({ broker: e.target.value })}>
-                <option value="">All brokers</option>
-                {selectOptions(options.brokers)}
-              </select>
-              <select aria-label="Registered owner" className={mobileFilterInput} value={filters.owner} onChange={(e) => apply({ owner: e.target.value })}>
-                <option value="">All owners</option>
-                {selectOptions(options.owners)}
-              </select>
-              <select aria-label="Origin" className={mobileFilterInput} value={filters.origin} onChange={(e) => apply({ origin: e.target.value })}>
-                <option value="">All origins</option>
-                {selectOptions(options.origins)}
-              </select>
-              <select aria-label="Plate number" className={mobileFilterInput} value={filters.plate} onChange={(e) => apply({ plate: e.target.value })}>
-                <option value="">All plate numbers</option>
-                {selectOptions(options.plates)}
-              </select>
-              <select aria-label="Fishing gear" className={mobileFilterInput} value={filters.gear} onChange={(e) => apply({ gear: e.target.value })}>
-                <option value="">All fishing gear</option>
-                {selectOptions(options.gears)}
-              </select>
-              <select aria-label="Fishing ground" className={mobileFilterInput} value={filters.ground} onChange={(e) => apply({ ground: e.target.value })}>
-                <option value="">All fishing grounds</option>
-                {selectOptions(options.grounds)}
-              </select>
-              <select aria-label="Quality" className={mobileFilterInput} value={filters.quality} onChange={(e) => apply({ quality: e.target.value })}>
-                <option value="">Any quality</option>
-                {selectOptions(options.qualities)}
-              </select>
-              <select aria-label="Review state" className={mobileFilterInput} value={filters.reviewed} onChange={(e) => apply({ reviewed: e.target.value })}>
-                <option value="">Reviewed or not</option>
-                <option value="yes">Reviewed</option>
-                <option value="no">Not reviewed yet</option>
-              </select>
-
-              <input type="number" min={0} inputMode="decimal" aria-label="Minimum volume in kg" placeholder="Min volume (kg)" className={mobileFilterInput} value={filters.min_volume} onChange={(e) => setFilters({ ...filters, min_volume: e.target.value })} />
-              <input type="number" min={0} inputMode="decimal" aria-label="Maximum volume in kg" placeholder="Max volume (kg)" className={mobileFilterInput} value={filters.max_volume} onChange={(e) => setFilters({ ...filters, max_volume: e.target.value })} />
-              <input type="number" min={0} inputMode="decimal" aria-label="Minimum total value" placeholder="Min total value" className={mobileFilterInput} value={filters.min_value} onChange={(e) => setFilters({ ...filters, min_value: e.target.value })} />
-              <input type="number" min={0} inputMode="decimal" aria-label="Maximum total value" placeholder="Max total value" className={mobileFilterInput} value={filters.max_value} onChange={(e) => setFilters({ ...filters, max_value: e.target.value })} />
-
-              <select
-                aria-label="Sort"
-                className={`${mobileFilterInput} lg:col-span-2`}
-                value={`${filters.sort}:${filters.dir}`}
-                onChange={(e) => {
-                  const [sort, dir] = e.target.value.split(":");
-                  setTableSort(null);
-                  apply({ sort, dir });
-                }}
-              >
-                {SORTS.map((s) => (
-                  <option key={s.label} value={`${s.sort}:${s.dir}`}>{s.label}</option>
-                ))}
-              </select>
-            </div>
-          )}
         </form>
 
         {/* What is currently applied */}
@@ -1749,10 +1692,12 @@ export default function LandingsPage() {
           <p className="mt-3 font-medium text-slate-900">
             {month !== "0" ? `No landings found in ${periodLabel}` : filters.year ? `No landings found in ${filters.year}` : "No landings found"}
           </p>
-          <p className="mt-1 text-sm text-slate-600">Change the filters or record a new landing.</p>
-          <button onClick={openNewEntry} className={`${primaryBtn} mt-5`}>
-            <Plus size={16} /> New entry
-          </button>
+          <p className="mt-1 text-sm text-slate-600">{canEdit ? "Change the filters or record a new landing." : "Try changing or clearing the filters."}</p>
+          {canEdit && (
+            <button onClick={openNewEntry} className={`${primaryBtn} mt-5`}>
+              <Plus size={16} /> New entry
+            </button>
+          )}
         </div>
       ) : (
         <div className="space-y-3">

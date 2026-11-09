@@ -155,7 +155,7 @@ function lf_where(array $g, bool $isTop): array {
     $expressions[] = "CASE WHEN truck_delivery = 1 THEN 'By land' ELSE 'By sea' END";
     $expressions[] = "DATE_FORMAT(landing_date, '%b %e, %Y')";
     $expressions[] = "TIME_FORMAT(landing_time, '%l:%i %p')";
-    $like = '%' . strtr(mb_strtolower($query), ['!' => '!!', '%' => '!%', '' => '!']) . '%';
+    $like = '%' . strtr(mb_strtolower($query), ['!' => '!!', '%' => '!%', '_' => '!_']) . '%';
     $matches = [];
     foreach ($expressions as $expression) {
       $matches[] = "LOWER(COALESCE(CAST(($expression) AS CHAR), '')) LIKE ? ESCAPE '!'";

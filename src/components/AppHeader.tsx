@@ -87,7 +87,7 @@ export default function AppHeader({ onMenuOpen }: { onMenuOpen: () => void }) {
   }
 
   return (
-    <header className="sticky top-0 z-[9999] border-b border-sky-200/80 bg-[linear-gradient(105deg,#ffffff,#f4f9fd_58%,#eaf4fb)] text-[#14263d] shadow-[0_8px_24px_-18px_rgba(8,47,73,0.35)]">
+    <header className="sticky top-0 z-40 border-b border-sky-200/80 bg-[linear-gradient(105deg,#ffffff,#f4f9fd_58%,#eaf4fb)] text-[#14263d] shadow-[0_8px_24px_-18px_rgba(8,47,73,0.35)]">
       <div className="flex h-[4.75rem] items-center gap-3 px-4 sm:px-5 lg:px-6 xl:px-8">
         <button
           type="button"

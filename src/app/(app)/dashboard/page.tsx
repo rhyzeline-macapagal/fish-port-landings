@@ -13,13 +13,14 @@ import StatusBadge from "@/components/StatusBadge";
 import ExportMenu, { type ExportKind } from "@/components/ExportMenu";
 import AnimatedSelect from "@/components/AnimatedSelect";
 import type { Report } from "@/lib/export"; // type only: the export library itself loads on demand
+import { formatSpeciesName, groupSpeciesVolumes, speciesClassification } from "@/lib/species";
 
 /* ------------------------------------------------------------------ */
 /* Performance notes                                                   */
 /* - No chart library: bars and sparklines are plain CSS / tiny SVG.   */
 /* - No blur blobs, backdrop-filter or gradients: cheap to paint.      */
 /* - PDF/Excel export code is loaded only when someone clicks Export.  */
-/* - Responses are cached per year/month, so revisiting is instant.    */
+/* - Responses are cached per year/month/day for quick revisiting.     */
 /* - Derived data is memoized; cards only re-render when props change. */
 /* ------------------------------------------------------------------ */
 
@@ -61,6 +62,7 @@ interface DashboardData {
   total_value: number | string;
   pending_review: number | string;
   by_species: { species: string; volume: number | string }[];
+  hipon_species?: { species: string; volume: number | string }[];
   by_month: MonthRow[];
   prev: PrevTotals;
   compare_label: string;
@@ -69,12 +71,13 @@ interface DashboardData {
   recent: Landing[];
   year: number;
   month: number;
+  day?: number;
   years: number[];
   by_route: {
     land: { landings: number | string; value: number | string; weight: number | string };
     sea: { landings: number | string; value: number | string; weight: number | string };
   };
-  active_days: number | string;
+  period_days: number | string;
 }
 
 type SpeciesReference = {
@@ -175,13 +178,15 @@ function Empty({ icon: Icon, title, text, height = "h-56" }: { icon: typeof Fish
 
 // Pure-CSS monthly bars. Each bar is a button: click to filter by that month.
 const MonthlyBars = memo(function MonthlyBars({
-  data, selected, onSelect,
+  data, selected, onSelect, metric = "volume",
 }: {
   data: MonthPoint[];
   selected: number;
   onSelect: (n: number) => void;
+  metric?: "volume" | "amount";
 }) {
-  const rawMax = Math.max(...data.map((d) => d.volume), 1);
+  const rawMax = Math.max(...data.map((d) => d[metric]), 1);
+  const formatValue = metric === "amount" ? formatPeso : formatKg;
   const magnitude = 10 ** Math.floor(Math.log10(rawMax));
   const normalized = rawMax / magnitude;
   const nice = normalized <= 1 ? 1 : normalized <= 2 ? 2 : normalized <= 5 ? 5 : 10;
@@ -194,9 +199,9 @@ const MonthlyBars = memo(function MonthlyBars({
   };
 
   return (
-    <div className="flex h-full min-w-0" role="group" aria-label="Monthly landing volume in kilograms">
+    <div className="flex h-full min-w-0" role="group" aria-label={metric === "amount" ? "Monthly landing value in Philippine pesos" : "Monthly landing volume in kilograms"}>
       <div className="flex w-10 shrink-0 flex-col justify-between pb-7 pr-2 text-right text-[9px] tabular-nums text-slate-400 sm:w-12 sm:text-[10px]">
-        {tickLabels.map((tick) => <span key={tick}>{compact(tick)}</span>)}
+        {tickLabels.map((tick) => <span key={tick}>{metric === "amount" ? "₱" : ""}{compact(tick)}</span>)}
       </div>
       <div className="relative flex min-w-0 flex-1 gap-1 sm:gap-2">
         <div className="pointer-events-none absolute inset-x-0 bottom-7 top-0 flex flex-col justify-between" aria-hidden="true">
@@ -205,30 +210,33 @@ const MonthlyBars = memo(function MonthlyBars({
         {data.map((d, i) => {
           const active = selected === i + 1;
           const dim = selected !== 0 && !active;
-          const percentage = d.volume > 0 ? Math.max((d.volume / max) * 100, 2) : 0;
+          const value = d[metric];
+          const percentage = value > 0 ? Math.max((value / max) * 100, 2) : 0;
           return (
             <button
               key={d.label}
               type="button"
               onClick={() => onSelect(i + 1)}
               aria-pressed={active}
-              aria-label={`${d.full}: ${formatKg(d.volume)} across ${d.landings.toLocaleString()} landings`}
+              aria-label={`${d.full}: ${formatValue(value)} across ${d.landings.toLocaleString()} landings`}
               className="group relative z-10 flex min-w-0 flex-1 flex-col focus-visible:outline-none"
             >
               <span className="relative flex flex-1 items-end justify-center">
                 <span
                   className={`relative w-[72%] max-w-8 rounded-t-sm transition-colors group-focus-visible:ring-2 group-focus-visible:ring-[#0875d1] ${
-                    d.volume === 0
+                    value === 0
                       ? "h-px bg-slate-300"
                       : dim
                         ? "bg-sky-200 group-hover:bg-sky-300"
-                        : "bg-[#48aaf0] group-hover:bg-[#0875d1]"
+                        : metric === "amount"
+                          ? "bg-emerald-400 group-hover:bg-emerald-600"
+                          : "bg-[#48aaf0] group-hover:bg-[#0875d1]"
                   }`}
-                  style={d.volume > 0 ? { height: `${percentage}%` } : undefined}
+                  style={value > 0 ? { height: `${percentage}%` } : undefined}
                 >
-                  {d.volume > 0 && (
+                  {value > 0 && (
                     <span className="pointer-events-none absolute -top-11 left-1/2 z-20 hidden -translate-x-1/2 whitespace-nowrap rounded-md bg-[#12344d] px-2 py-1 text-[9px] font-medium text-white opacity-0 shadow-lg transition-opacity group-hover:block group-hover:opacity-100 group-focus-visible:block group-focus-visible:opacity-100 sm:text-[10px]">
-                      {formatKg(d.volume)}
+                      {formatValue(value)}
                     </span>
                   )}
                 </span>
@@ -244,12 +252,16 @@ const MonthlyBars = memo(function MonthlyBars({
   );
 });
 
-function SpeciesBar({ name, volume, pct, rank, reference }: { name: string; volume?: number; pct: number; rank?: number; reference?: SpeciesReference }) {
+function SpeciesBar({ name, volume, pct, rank, reference, onSelect }: { name: string; volume?: number; pct: number; rank?: number; reference?: SpeciesReference; onSelect?: () => void }) {
   return (
     <li className="grid gap-3 border-b border-slate-100 px-5 py-4 last:border-b-0 lg:grid-cols-[2rem_minmax(11rem,1.15fr)_minmax(10rem,1fr)_minmax(10rem,1fr)_minmax(11rem,1fr)_8rem] lg:items-start lg:gap-4">
       <span className="pt-0.5 text-xs tabular-nums text-slate-400">{rank}</span>
       <div className="min-w-0">
-        <p className="break-words text-sm font-semibold text-[#14263d]">{reference?.local_name || name}</p>
+        {onSelect ? (
+          <button type="button" onClick={onSelect} className="break-words text-left text-sm font-semibold text-[#0875d1] underline underline-offset-4" aria-label="View HIPON species breakdown">{name}</button>
+        ) : (
+          <p className="break-words text-sm font-semibold text-[#14263d]">{formatSpeciesName(reference?.local_name || name)}</p>
+        )}
         <span className="mt-1 block text-[10px] font-medium uppercase tracking-wide text-slate-400 lg:hidden">Local name</span>
       </div>
       <div className="min-w-0">
@@ -281,7 +293,7 @@ function DashboardSkeleton({ className = "h-64" }: { className?: string }) {
   );
 }
 
-function SpeciesDonut({ slices, total }: { slices: SpeciesSlice[]; total: number }) {
+function SpeciesDonut({ slices, total, onHiponClick }: { slices: SpeciesSlice[]; total: number; onHiponClick: () => void }) {
   const gradient = slices.map((slice, index) => {
     const start = slices.slice(0, index).reduce((sum, item) => sum + item.percentage, 0);
     const end = start + slice.percentage;
@@ -307,7 +319,11 @@ function SpeciesDonut({ slices, total }: { slices: SpeciesSlice[]; total: number
         {slices.map((slice) => (
           <li key={slice.name} className="flex items-center gap-2 text-[10px]">
             <span className="h-2 w-2 shrink-0 rounded-sm" style={{ background: slice.color }} />
-            <span className="min-w-0 flex-1 truncate font-medium text-slate-700">{slice.name}</span>
+            {slice.name === "HIPON" ? (
+              <button type="button" onClick={onHiponClick} className="min-w-0 flex-1 truncate text-left font-medium text-[#0875d1] underline underline-offset-4" aria-label="View HIPON species breakdown">HIPON</button>
+            ) : (
+              <span className="min-w-0 flex-1 truncate font-medium text-slate-700">{slice.name}</span>
+            )}
             <span className="shrink-0 tabular-nums text-slate-500">{slice.percentage.toFixed(0)}%</span>
           </li>
         ))}
@@ -326,11 +342,12 @@ export default function DashboardPage() {
   const [fetching, setFetching] = useState(false);
   const [year, setYear] = useState(() => String(new Date().getFullYear()));
   const [month, setMonth] = useState("0"); // "0" = all months
+  const [day, setDay] = useState("0"); // "0" = all days in the month
   const [years, setYears] = useState<number[]>([]);
-  const [showAllSpecies, setShowAllSpecies] = useState(false);
+  const [speciesView, setSpeciesView] = useState<"all" | "hipon" | null>(null);
   const [speciesReferences, setSpeciesReferences] = useState<SpeciesReference[]>([]);
 
-  // Cache responses per year+month. Cleared whenever a landing is added/edited (version changes).
+  // Cache responses per year+month+day. Cleared whenever a landing changes.
   const cache = useRef(new Map<string, DashboardData>());
   const cachedVersion = useRef(version);
 
@@ -340,7 +357,7 @@ export default function DashboardPage() {
       cachedVersion.current = version;
     }
 
-    const key = `${year}:${month}`;
+    const key = `${year}:${month}:${day}`;
     const hit = cache.current.get(key);
     if (hit) {
       setData(hit);
@@ -352,11 +369,14 @@ export default function DashboardPage() {
     let ignore = false;
     setError("");
     setFetching(true);
-    api<DashboardData>(`dashboard.php?year=${year}&month=${month}`)
+    api<DashboardData>(`dashboard.php?year=${year}&month=${month}&day=${day}`)
       .then(async (d) => {
         if (ignore) return;
-        if (!d.by_route?.land || !d.by_route?.sea || d.active_days == null) {
+        if (!d.by_route?.land || !d.by_route?.sea || !d.period_days) {
           throw new Error("Dashboard analytics data is unavailable. Please deploy the latest dashboard API.");
+        }
+        if (Number(day) && Number(d.day) !== Number(day)) {
+          throw new Error("Daily reporting is currently unavailable.");
         }
         if (!d.record_start_date || !d.record_end_date) {
           const [firstRows, lastRows] = await Promise.all([
@@ -369,14 +389,20 @@ export default function DashboardPage() {
             record_end_date: lastRows[0]?.landing_date ?? null,
           };
         }
+        if (ignore) return;
         cache.current.set(key, d);
         setData(d);
         if (d.years?.length) setYears(d.years);
       })
-      .catch((e) => !ignore && setError(e.message))
+      .catch((e) => {
+        if (!ignore) {
+          setData(null);
+          setError(e.message);
+        }
+      })
       .finally(() => !ignore && setFetching(false));
     return () => { ignore = true; };
-  }, [version, year, month]);
+  }, [version, year, month, day]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -390,16 +416,17 @@ export default function DashboardPage() {
 
   // Close the species popup with Esc
   useEffect(() => {
-    if (!showAllSpecies) return;
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setShowAllSpecies(false);
+    if (!speciesView) return;
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setSpeciesView(null);
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [showAllSpecies]);
+  }, [speciesView]);
 
   const m = Number(month);
-  const periodLabel = m ? `${MONTHS[m - 1]} ${year}` : year;
+  const selectedDay = Number(day);
+  const periodLabel = m ? `${MONTHS[m - 1]} ${selectedDay ? `${selectedDay}, ` : ""}${year}` : year;
   const yearOptions = years.length ? years : [Number(year)];
-  const loading = !data && !error;
+  const loading = fetching || (!data && !error);
   const latestLandingDate = (data?.recent ?? []).reduce((latest, record) => (
     !latest || record.landing_date > latest ? record.landing_date : latest
   ), "");
@@ -407,13 +434,25 @@ export default function DashboardPage() {
 
   // Derived data (memoized so month/year toggles don't recompute everything)
   const species = useMemo<SpeciesRow[]>(
-    () => (data?.by_species ?? []).map((s) => ({ name: s.species, volume: Number(s.volume) })),
+    () => groupSpeciesVolumes(data?.by_species ?? []),
     [data]
   );
+  const hiponSpecies = useMemo<SpeciesRow[]>(() => {
+    const totals = new Map<string, number>();
+    const rows = data?.hipon_species ?? (data?.by_species ?? []).filter((row) => speciesClassification(row.species) === "HIPON");
+    rows.forEach((row) => {
+      const name = row.species.trim().toUpperCase() === "HIPON" ? "HIPON (UNSPECIFIED)" : formatSpeciesName(row.species);
+      totals.set(name, (totals.get(name) ?? 0) + Number(row.volume));
+    });
+    return [...totals].map(([name, volume]) => ({ name, volume })).sort((a, b) => b.volume - a.volume);
+  }, [data]);
+  const popupSpecies = speciesView === "hipon" ? hiponSpecies : species;
+  const popupTotal = popupSpecies.reduce((sum, row) => sum + row.volume, 0);
+  const popupTitle = speciesView === "hipon" ? `HIPON species in ${periodLabel}` : `All species in ${periodLabel}`;
   const speciesReferenceByName = useMemo(() => {
     const references = new Map<string, SpeciesReference>();
     speciesReferences.forEach((reference) => {
-      if (reference.local_name?.trim()) references.set(reference.local_name.trim().toLocaleLowerCase(), reference);
+      if (reference.local_name?.trim()) references.set(formatSpeciesName(reference.local_name).toLocaleLowerCase(), reference);
     });
     return references;
   }, [speciesReferences]);
@@ -456,6 +495,7 @@ export default function DashboardPage() {
     [monthly]
   );
   const noMonthlyData = monthly.every((r) => r.volume === 0);
+  const noMonthlyValue = monthly.every((r) => r.amount === 0);
 
   const recent = data?.recent ?? [];
   const pending = num(data?.pending_review);
@@ -494,10 +534,14 @@ export default function DashboardPage() {
     value: routeNumber(data?.by_route?.sea, "value"),
     weight: routeNumber(data?.by_route?.sea, "weight"),
   };
-  const activeDays = Math.max(0, num(data?.active_days));
-  const averageDaily = (value: number) => (activeDays > 0 ? value / activeDays : 0);
+  const periodDays = Math.max(1, num(data?.period_days));
+  const averageDaily = (value: number) => value / periodDays;
 
-  const toggleMonth = (n: number) => setMonth((prevMonth) => (prevMonth === String(n) ? "0" : String(n)));
+  function changeMonth(value: string) {
+    setMonth(value);
+    setDay("0");
+  }
+  const toggleMonth = (n: number) => changeMonth(month === String(n) ? "0" : String(n));
 
   // Exports what the dashboard shows. The export library (PDF/Excel) is loaded only now.
   async function exportDashboard(kind: ExportKind) {
@@ -527,7 +571,12 @@ export default function DashboardPage() {
             { header: "Volume (kg)", format: "decimal" },
             { header: "Share", format: "percent" },
           ],
-          rows: species.map((s) => [s.name, s.volume, pct(s.volume)]),
+          rows: species.flatMap((s) => [
+            [s.name, s.volume, pct(s.volume)],
+            ...(s.name === "HIPON"
+              ? hiponSpecies.map((type) => [`    - ${type.name}`, type.volume, pct(type.volume)])
+              : []),
+          ]),
           totals: ["Total", speciesTotal, species.length ? 100 : 0],
         },
         {
@@ -584,7 +633,7 @@ export default function DashboardPage() {
         },
       ],
     };
-    const name = `dashboard_${year}${m ? "_" + String(m).padStart(2, "0") : ""}_${stamp()}`;
+    const name = `dashboard_${year}${m ? "_" + String(m).padStart(2, "0") : ""}${selectedDay ? "_" + String(selectedDay).padStart(2, "0") : ""}_${stamp()}`;
     if (kind === "xlsx") await exportXlsx(name, report);
     else await exportPdf(name, report);
   }
@@ -592,6 +641,12 @@ export default function DashboardPage() {
   const monthOptions = [
     { v: "0", l: "All months" },
     ...MONTHS.map((label, index) => ({ v: String(index + 1), l: label })),
+  ];
+  const dayOptions = [
+    { value: "0", label: "All days" },
+    ...Array.from({ length: m ? new Date(Number(year), m, 0).getDate() : 0 }, (_, index) => ({
+      value: String(index + 1), label: `Day ${index + 1}`,
+    })),
   ];
 
   return (
@@ -605,26 +660,46 @@ export default function DashboardPage() {
           <p className="mt-1 text-sm text-slate-500">Here&apos;s what&apos;s happening at Mercedes FishPort today.</p>
         </div>
 
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-center xl:justify-end">
+        <div className="flex min-w-0 flex-col gap-3 xl:items-end">
           <p className="whitespace-nowrap text-xs font-medium text-slate-500">{today}</p>
-          <div className="flex flex-wrap items-center gap-2">
-            <AnimatedSelect
-              label="Reporting year"
-              value={year}
-              options={yearOptions.map((option) => ({ value: String(option), label: String(option) }))}
-              onChange={setYear}
-              className="min-w-28"
-              align="right"
-            />
-            <AnimatedSelect
-              label="Reporting month"
-              value={month}
-              options={monthOptions.map((option) => ({ value: option.v, label: option.l }))}
-              onChange={setMonth}
-              className="min-w-32"
-              align="right"
-            />
-            <ExportMenu onExport={exportDashboard} disabled={!data} title={`Download the ${periodLabel} dashboard`} />
+          <div className="flex w-full flex-wrap items-end gap-2 xl:justify-end">
+            <div role="group" aria-label="Reporting period" className="grid w-full grid-cols-3 gap-2 sm:w-auto">
+              <div className="min-w-0 space-y-1">
+                <p className="text-xs font-medium text-slate-600">Year</p>
+                <AnimatedSelect
+                  label="Reporting year"
+                  value={year}
+                  options={yearOptions.map((option) => ({ value: String(option), label: String(option) }))}
+                  onChange={(value) => { setYear(value); setDay("0"); }}
+                  className="min-w-0 sm:min-w-28"
+                  align="left"
+                />
+              </div>
+              <div className="min-w-0 space-y-1">
+                <p className="text-xs font-medium text-slate-600">Month</p>
+                <AnimatedSelect
+                  label="Reporting month"
+                  value={month}
+                  options={monthOptions.map((option) => ({ value: option.v, label: option.l }))}
+                  onChange={changeMonth}
+                  className="min-w-0 sm:min-w-32"
+                  align="left"
+                />
+              </div>
+              <div className="min-w-0 space-y-1" title={m ? undefined : "Select a month to filter by day"}>
+                <p className="text-xs font-medium text-slate-600">Day</p>
+                <AnimatedSelect
+                  label="Reporting day"
+                  value={day}
+                  options={dayOptions}
+                  onChange={setDay}
+                  disabled={!m}
+                  className="min-w-0 sm:min-w-28"
+                  align="right"
+                />
+              </div>
+            </div>
+            <ExportMenu onExport={exportDashboard} disabled={!data || fetching || !!error} title={`Download the ${periodLabel} dashboard`} />
             {canAdd && (
               <button
                 type="button"
@@ -635,6 +710,7 @@ export default function DashboardPage() {
               </button>
             )}
           </div>
+          {!m && <p className="text-xs text-slate-500">Select a month to filter by day.</p>}
         </div>
       </section>
 
@@ -739,7 +815,7 @@ export default function DashboardPage() {
       </section>
 
       <section aria-label="Average daily landing value">
-        <CardHeader title="Average Daily Landing Value" subtitle={`Based on ${activeDays.toLocaleString()} days with landings in ${periodLabel}`} />
+        <CardHeader title="Average Daily Landing Value" subtitle={`Based on ${periodDays.toLocaleString()} calendar ${periodDays === 1 ? "day" : "days"} in ${periodLabel}`} />
         <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3 lg:gap-4">
           <KpiCard
             label="Average Daily Value - Combined"
@@ -775,10 +851,10 @@ export default function DashboardPage() {
         <div className={`${card} p-5 lg:col-span-2 xl:col-span-6`}>
           <CardHeader
             title={`Monthly Landing Volume (${year})`}
-            subtitle="Volume in kilograms. Select a bar to filter the dashboard."
+            subtitle="Full-year volume in kilograms. Select a bar to choose a month."
             right={
               m ? (
-                <button onClick={() => setMonth("0")} className="shrink-0 text-xs font-semibold text-[#0875d1] hover:text-[#1a8cc7]">Clear {MONTHS_SHORT[m - 1]}</button>
+                <button onClick={() => changeMonth("0")} className="shrink-0 text-xs font-semibold text-[#0875d1] hover:text-[#1a8cc7]">Clear {MONTHS_SHORT[m - 1]}</button>
               ) : undefined
             }
           />
@@ -793,7 +869,24 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        <div className={`${card} p-5 xl:col-span-3`}>
+        <div className={`${card} p-5 lg:col-span-2 xl:col-span-6`}>
+          <CardHeader
+            title={`Monthly Landing Value (${year})`}
+            subtitle="Full-year value in Philippine pesos. Select a bar to choose a month."
+            right={m ? <button type="button" onClick={() => changeMonth("0")} className="shrink-0 text-xs font-semibold text-[#0875d1] hover:text-[#1a8cc7]">Clear {MONTHS_SHORT[m - 1]}</button> : undefined}
+          />
+          <div className="mt-5 h-56 sm:h-64">
+            {loading ? (
+              <DashboardSkeleton className="h-full" />
+            ) : noMonthlyValue ? (
+              <Empty icon={Wallet} title="No landing value yet" text={`No landing value recorded in ${year}.`} height="h-full" />
+            ) : (
+              <MonthlyBars data={monthly} selected={m} onSelect={toggleMonth} metric="amount" />
+            )}
+          </div>
+        </div>
+
+        <div className={`${card} p-5 xl:col-span-6`}>
           <CardHeader
             title="Species Share"
             subtitle={`Share of ${periodLabel} volume`}
@@ -803,16 +896,16 @@ export default function DashboardPage() {
           ) : species.length === 0 ? (
             <Empty icon={Fish} title="Nothing to show" text="Shares appear after the first landing." height="h-56" />
           ) : (
-            <SpeciesDonut slices={speciesSlices} total={speciesTotal} />
+            <SpeciesDonut slices={speciesSlices} total={speciesTotal} onHiponClick={() => setSpeciesView("hipon")} />
           )}
         </div>
 
-        <div className={`${card} p-5 xl:col-span-3`}>
+        <div className={`${card} p-5 xl:col-span-6`}>
           <CardHeader
             title="Top 6 Species"
             subtitle={`Highest volume in ${periodLabel}`}
-            right={species.length > 6 ? (
-              <button type="button" onClick={() => setShowAllSpecies(true)} className="shrink-0 text-xs font-semibold text-[#0875d1] hover:text-[#1a8cc7]">View all</button>
+            right={species.length > 0 ? (
+              <button type="button" onClick={() => setSpeciesView("all")} className="shrink-0 text-xs font-semibold text-[#0875d1] hover:text-[#1a8cc7]">View all</button>
             ) : undefined}
           />
           {loading ? (
@@ -825,7 +918,11 @@ export default function DashboardPage() {
                 <li key={item.name} className="flex items-center gap-3 py-2.5">
                   <span className={`grid h-6 w-6 shrink-0 place-items-center rounded-full text-[10px] font-semibold ${index < 3 ? "bg-amber-50 text-amber-700" : "bg-slate-100 text-slate-600"}`}>{index + 1}</span>
                   <Fish size={17} className="shrink-0 text-[#1a8cc7]" aria-hidden="true" />
-                  <span className="min-w-0 flex-1 truncate text-xs font-medium text-slate-700">{item.name}</span>
+                  {item.name === "HIPON" ? (
+                    <button type="button" onClick={() => setSpeciesView("hipon")} className="min-w-0 flex-1 truncate text-left text-xs font-medium text-[#0875d1] underline underline-offset-4" aria-label="View HIPON species breakdown">HIPON</button>
+                  ) : (
+                    <span className="min-w-0 flex-1 truncate text-xs font-medium text-slate-700">{item.name}</span>
+                  )}
                   <span className="shrink-0 text-[11px] font-semibold tabular-nums text-[#14263d]">{Math.round(item.volume).toLocaleString()} kg</span>
                 </li>
               ))}
@@ -869,7 +966,7 @@ export default function DashboardPage() {
                       <td className="whitespace-nowrap px-5 py-3 text-slate-600">{formatDate(record.landing_date)}</td>
                       <td className="px-3 py-3 font-medium text-[#14263d]">{record.boat_name}</td>
                       <td className="px-3 py-3 text-slate-600">{record.origin || "-"}</td>
-                      <td className="px-3 py-3 text-slate-700">{record.species}</td>
+                      <td className="px-3 py-3 text-slate-700">{speciesClassification(record.species) === "HIPON" ? <button type="button" onClick={() => setSpeciesView("hipon")} className="font-medium text-[#0875d1] underline underline-offset-4">HIPON</button> : record.species}</td>
                       <td className="whitespace-nowrap px-3 py-3 text-right tabular-nums text-slate-700">{Number(record.volume).toLocaleString()} {record.unit}</td>
                       <td className="whitespace-nowrap px-3 py-3 text-right font-semibold tabular-nums text-[#14263d]">{formatPeso(record.total_value)}</td>
                       <td className="px-5 py-3"><StatusBadge status={record.status} /></td>
@@ -889,7 +986,7 @@ export default function DashboardPage() {
                     <StatusBadge status={record.status} />
                   </div>
                   <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 text-[11px]">
-                    <div><dt className="text-slate-400">Species</dt><dd className="mt-0.5 truncate font-medium text-slate-700">{record.species}</dd></div>
+                    <div><dt className="text-slate-400">Species</dt><dd className="mt-0.5 truncate font-medium text-slate-700">{speciesClassification(record.species) === "HIPON" ? <button type="button" onClick={() => setSpeciesView("hipon")} className="text-[#0875d1] underline underline-offset-4">HIPON</button> : record.species}</dd></div>
                     <div><dt className="text-slate-400">Origin</dt><dd className="mt-0.5 truncate font-medium text-slate-700">{record.origin || "-"}</dd></div>
                     <div><dt className="text-slate-400">Volume</dt><dd className="mt-0.5 font-medium tabular-nums text-slate-700">{Number(record.volume).toLocaleString()} {record.unit}</dd></div>
                     <div><dt className="text-slate-400">Total value</dt><dd className="mt-0.5 font-semibold tabular-nums text-[#14263d]">{formatPeso(record.total_value)}</dd></div>
@@ -902,29 +999,30 @@ export default function DashboardPage() {
       </section>
 
       {/* All species popup (only mounted while open) */}
-      {showAllSpecies && (
+      {speciesView && (
         <div
           className="fixed inset-0 z-50 grid place-items-center bg-slate-900/50 p-4"
-          onClick={() => setShowAllSpecies(false)}
+          onClick={() => setSpeciesView(null)}
         >
           <div
             role="dialog"
             aria-modal="true"
-            aria-label={`All species in ${periodLabel}`}
+            aria-label={popupTitle}
             className={`${card} flex max-h-[90vh] w-full max-w-6xl flex-col overflow-hidden shadow-2xl`}
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-start justify-between gap-4 border-b border-slate-200 bg-white px-5 py-5 sm:px-7">
               <div>
                 <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#0875d1]">Species breakdown</p>
-                <h2 className="mt-1 text-lg font-semibold text-slate-900">All species in {periodLabel}</h2>
+                <h2 className="mt-1 text-lg font-semibold text-slate-900">{popupTitle}</h2>
+                {speciesView === "hipon" && <button type="button" onClick={() => setSpeciesView("all")} className="mt-2 text-xs font-semibold text-[#0875d1] hover:underline">Back to all species</button>}
                 <div className="mt-2 flex flex-wrap gap-2 text-xs text-slate-500">
-                  <span className="rounded-full bg-slate-100 px-2.5 py-1">{species.length} species</span>
-                  <span className="rounded-full bg-slate-100 px-2.5 py-1">{Math.round(speciesTotal).toLocaleString()} kg total</span>
+                  <span className="rounded-full bg-slate-100 px-2.5 py-1">{popupSpecies.length} {speciesView === "hipon" ? "entries" : "species"}</span>
+                  <span className="rounded-full bg-slate-100 px-2.5 py-1">{Math.round(popupTotal).toLocaleString()} kg total</span>
                 </div>
               </div>
               <button
-                onClick={() => setShowAllSpecies(false)}
+                onClick={() => setSpeciesView(null)}
                 aria-label="Close"
                 className="grid h-8 w-8 shrink-0 place-items-center rounded-md text-slate-600 hover:bg-slate-100 hover:text-slate-900"
               >
@@ -936,17 +1034,19 @@ export default function DashboardPage() {
               <span>#</span><span>Local name</span><span>Other names</span><span>Common name</span><span>Scientific name</span><span className="text-right">Volume / share</span>
             </div>
             <ul className="overflow-y-auto">
-              {species.map((s, i) => (
+              {popupSpecies.map((s, i) => (
                 <SpeciesBar
                   key={s.name}
                   name={s.name}
                   volume={s.volume}
-                  pct={speciesTotal ? (s.volume / speciesTotal) * 100 : 0}
+                  pct={popupTotal ? (s.volume / popupTotal) * 100 : 0}
                   rank={i + 1}
                   reference={speciesReferenceByName.get(s.name.trim().toLocaleLowerCase())}
+                  onSelect={speciesView === "all" && s.name === "HIPON" ? () => setSpeciesView("hipon") : undefined}
                 />
               ))}
             </ul>
+            {speciesView === "hipon" && popupSpecies.length === 0 && <p className="px-5 py-8 text-sm text-slate-500">No HIPON species breakdown is available for this period.</p>}
           </div>
         </div>
       )}
