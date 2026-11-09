@@ -74,7 +74,7 @@ interface DashboardData {
     land: { landings: number | string; value: number | string; weight: number | string };
     sea: { landings: number | string; value: number | string; weight: number | string };
   };
-  period_days: number | string;
+  active_days: number | string;
 }
 
 type SpeciesReference = {
@@ -355,7 +355,7 @@ export default function DashboardPage() {
     api<DashboardData>(`dashboard.php?year=${year}&month=${month}`)
       .then(async (d) => {
         if (ignore) return;
-        if (!d.by_route?.land || !d.by_route?.sea || !d.period_days) {
+        if (!d.by_route?.land || !d.by_route?.sea || d.active_days == null) {
           throw new Error("Dashboard analytics data is unavailable. Please deploy the latest dashboard API.");
         }
         if (!d.record_start_date || !d.record_end_date) {
@@ -494,8 +494,8 @@ export default function DashboardPage() {
     value: routeNumber(data?.by_route?.sea, "value"),
     weight: routeNumber(data?.by_route?.sea, "weight"),
   };
-  const periodDays = Math.max(1, num(data?.period_days));
-  const averageDaily = (value: number) => value / periodDays;
+  const activeDays = Math.max(0, num(data?.active_days));
+  const averageDaily = (value: number) => (activeDays > 0 ? value / activeDays : 0);
 
   const toggleMonth = (n: number) => setMonth((prevMonth) => (prevMonth === String(n) ? "0" : String(n)));
 
@@ -739,7 +739,7 @@ export default function DashboardPage() {
       </section>
 
       <section aria-label="Average daily landing value">
-        <CardHeader title="Average Daily Landing Value" subtitle={`Based on ${periodDays.toLocaleString()} calendar days in ${periodLabel}`} />
+        <CardHeader title="Average Daily Landing Value" subtitle={`Based on ${activeDays.toLocaleString()} days with landings in ${periodLabel}`} />
         <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3 lg:gap-4">
           <KpiCard
             label="Average Daily Value - Combined"

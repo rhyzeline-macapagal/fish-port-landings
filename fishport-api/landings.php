@@ -11,6 +11,25 @@ const LF_KG = "(volume * IF(unit = 'ton', 1000, 1))";
 // One truck / boat trip = all rows sharing a trip_id (old rows fall back to their own id).
 const LF_TRIP = "COALESCE(trip_id, CONCAT('L', id))";
 
+// Older databases can lack optional fields such as fishing_ground.
+function lf_columns(): array {
+  static $columns = null;
+  if ($columns === null) {
+    $columns = array_fill_keys(db()->query('SHOW COLUMNS FROM fp_landings')->fetchAll(PDO::FETCH_COLUMN), true);
+  }
+  return $columns;
+}
+
+function lf_date(array $g, string $key): ?string {
+  if (!isset($g[$key]) || $g[$key] === '') return null;
+  $value = $g[$key];
+  if (!is_string($value) || !preg_match('/^(\d{4})-(\d{2})-(\d{2})$/', $value, $parts)
+      || !checkdate((int)$parts[2], (int)$parts[3], (int)$parts[1])) {
+    json_out(['error' => 'Choose a valid ' . ($key === 'from' ? 'From' : 'To') . ' date.'], 422);
+  }
+  return $value;
+}
+
 // Accepts ?x=a,b,c  or  ?x[]=a&x[]=b  and returns a clean list.
 function lf_list(array $g, string $key): array {
   if (!isset($g[$key])) return [];
@@ -28,6 +47,11 @@ function lf_list(array $g, string $key): array {
 function lf_where(array $g, bool $isTop): array {
   $w = ['1=1'];
   $p = [];
+  $fromDate = lf_date($g, 'from');
+  $toDate = lf_date($g, 'to');
+  if ($fromDate && $toDate && $fromDate > $toDate) {
+    json_out(['error' => 'From date must be on or before To date.'], 422);
+  }
 
   // Exact-match filters. Several values (comma list or array) = match any.
   $exact = [
@@ -69,7 +93,7 @@ function lf_where(array $g, bool $isTop): array {
   elseif ($rv === 'no')  $w[] = 'reviewed_at IS NULL';
 
   // Date range + quick periods (Philippine time).
-  if (!empty($g['period'])) {
+  if (!$fromDate && !$toDate && !empty($g['period'])) {
     $today = new DateTimeImmutable('today', new DateTimeZone('Asia/Manila'));
     $from = $to = null;
     switch (strtolower((string)$g['period'])) {
@@ -82,11 +106,11 @@ function lf_where(array $g, bool $isTop): array {
     if ($from) { $w[] = 'landing_date >= ?'; $p[] = $from->format('Y-m-d'); }
     if ($to)   { $w[] = 'landing_date <= ?'; $p[] = $to->format('Y-m-d'); }
   }
-  if (!empty($g['from'])) { $w[] = 'landing_date >= ?'; $p[] = $g['from']; }
-  if (!empty($g['to']))   { $w[] = 'landing_date <= ?'; $p[] = $g['to']; }
+  if ($fromDate) { $w[] = 'landing_date >= ?'; $p[] = $fromDate; }
+  if ($toDate)   { $w[] = 'landing_date <= ?'; $p[] = $toDate; }
 
   // Whole calendar year (?year=2026)
-  if (!empty($g['year']) && !is_array($g['year']) && ctype_digit((string)$g['year'])) {
+  if (!$fromDate && !$toDate && !empty($g['year']) && !is_array($g['year']) && ctype_digit((string)$g['year'])) {
     $y = (int)$g['year'];
     if ($y >= 2000 && $y <= 2100) {
       $w[] = 'landing_date BETWEEN ? AND ?';
@@ -115,12 +139,45 @@ function lf_where(array $g, bool $isTop): array {
     }
   }
 
-  // Free-text search across the main text columns.
-  if (!empty($g['q']) && !is_array($g['q'])) {
-    $cols = ['boat_name', 'boat_owner', 'origin', 'plate_number', 'broker', 'species', 'status', 'remarks'];
-    $w[] = '(' . implode(' OR ', array_map(fn($c) => "$c LIKE ?", $cols)) . ')';
-    $like = '%' . addcslashes((string)$g['q'], '%_\\') . '%';
-    foreach ($cols as $_) $p[] = $like;
+  // Search every record field, including dates, times, gear and numeric values.
+  // An explicit escape character keeps literal %, _ and backslashes safe across SQL modes.
+  $query = isset($g['q']) && !is_array($g['q']) ? trim((string)$g['q']) : '';
+  if ($query !== '') {
+    $columns = lf_columns();
+    $fields = ['id', 'landing_date', 'landing_time', 'boat_name', 'fishing_gear',
+      'origin', 'plate_number', 'boat_owner', 'species_id', 'species', 'volume',
+      'unit', 'price_per_kg', 'total_value', 'broker', 'quality', 'remarks',
+      'status', 'trip_id', 'fishing_ground'];
+    $expressions = [];
+    foreach ($fields as $column) {
+      if (isset($columns[$column])) $expressions[] = "fp_landings.`$column`";
+    }
+    $expressions[] = "CASE WHEN truck_delivery = 1 THEN 'By land' ELSE 'By sea' END";
+    $expressions[] = "DATE_FORMAT(landing_date, '%b %e, %Y')";
+    $expressions[] = "TIME_FORMAT(landing_time, '%l:%i %p')";
+    $like = '%' . strtr(mb_strtolower($query), ['!' => '!!', '%' => '!%', '' => '!']) . '%';
+    $matches = [];
+    foreach ($expressions as $expression) {
+      $matches[] = "LOWER(COALESCE(CAST(($expression) AS CHAR), '')) LIKE ? ESCAPE '!'";
+      $p[] = $like;
+    }
+    // Also accept displayed amounts such as PHP 1,500.00, ₱1,500, or 10 kg.
+    $numeric = preg_replace('/^(?:PHP|₱)\s*|\s*(?:kg|ton)$/iu', '', $query);
+    $numeric = str_replace([',', ' '], '', $numeric);
+    if (is_numeric($numeric)) {
+      $weightUnit = preg_match('/(kg|ton)$/i', $query, $unitMatch) ? strtolower($unitMatch[1]) : null;
+      $numericColumns = $weightUnit ? ['volume'] : (preg_match('/^(PHP|₱)/iu', $query)
+        ? ['price_per_kg', 'total_value'] : ['volume', 'price_per_kg', 'total_value']);
+      foreach ($numericColumns as $column) {
+        if (!isset($columns[$column])) continue;
+        $expression = $column === 'volume' && $weightUnit
+          ? ($weightUnit === 'kg' ? LF_KG : '(' . LF_KG . ' / 1000.0)')
+          : "fp_landings.`$column`";
+        $matches[] = "$expression = CAST(? AS DECIMAL(20, 6))";
+        $p[] = (float)$numeric;
+      }
+    }
+    $w[] = '(' . implode(' OR ', $matches) . ')';
   }
 
   return [$w, $p];
@@ -171,10 +228,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET') {
       'brokers'  => 'broker',        'origins'  => 'origin',
       'plates'   => 'plate_number',
       'gears'    => 'fishing_gear',  'species_ids' => 'species_id',
+      'grounds'  => 'fishing_ground',
       'qualities'=> 'quality',       'units'    => 'unit',
     ];
     $out = [];
+    $availableColumns = lf_columns();
     foreach ($cols as $key => $col) {
+      if (!isset($availableColumns[$col])) {
+        $out[$key] = [];
+        continue;
+      }
       $out[$key] = db()->query(
         "SELECT DISTINCT $col FROM fp_landings WHERE $col IS NOT NULL AND $col <> '' ORDER BY $col"
       )->fetchAll(PDO::FETCH_COLUMN);

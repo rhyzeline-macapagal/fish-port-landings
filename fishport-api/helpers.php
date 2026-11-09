@@ -75,8 +75,17 @@ function auth_user(array $roles = []): array {
 
   if (!$u) json_out(['error' => 'Unauthorized'], 401);
   $userRole = strtolower(trim((string)$u['role']));
+  $u['role'] = $userRole;
+
+  // Viewers can read every authenticated section, including legacy endpoints
+  // with admin/encoder-only role lists. They can never change records.
+  if ($userRole === 'viewer') {
+    $method = strtoupper($_SERVER['REQUEST_METHOD'] ?? 'GET');
+    if (!in_array($method, ['GET', 'HEAD'], true)) json_out(['error' => 'Forbidden'], 403);
+    return $u;
+  }
+
   $allowedRoles = array_map(fn($role) => strtolower(trim((string)$role)), $roles);
   if ($allowedRoles && !in_array($userRole, $allowedRoles, true)) json_out(['error' => 'Forbidden'], 403);
-  $u['role'] = $userRole;
   return $u;
 }

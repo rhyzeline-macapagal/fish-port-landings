@@ -4,15 +4,21 @@ auth_user(['admin', 'encoder', 'viewer']);
 
 $pdo = db();
 $vol = "CASE WHEN unit = 'ton' THEN volume * 1000 ELSE volume END";
+// Preserve individual species on landings; combine shrimp in overall reporting.
+$speciesGroup = "CASE WHEN LOWER(TRIM(species)) IN
+  ('hipon', 'sugpo', 'bukik', 'osbon', 'suahe', 'guludan', 'kuakit',
+   'sugpo (hipon)', 'bukik (hipon)', 'osbon (hipon)', 'suahe (hipon)',
+   'guludan (hipon)', 'kuakit (hipon)')
+  THEN 'HIPON' ELSE species END";
 $tz  = new DateTimeZone('Asia/Manila');
 
 // Totals for one date range (rejected landings excluded)
-function fp_period_totals(PDO $pdo, string $vol, array $r): array {
+function fp_period_totals(PDO $pdo, string $vol, string $speciesGroup, array $r): array {
   $st = $pdo->prepare(
     "SELECT COUNT(*) AS total_landings,
             COALESCE(SUM($vol), 0) AS total_volume,
             COALESCE(SUM(total_value), 0) AS total_value,
-            COUNT(DISTINCT species) AS species_count
+            COUNT(DISTINCT $speciesGroup) AS species_count
      FROM fp_landings
      WHERE status <> 'rejected' AND landing_date BETWEEN ? AND ?"
   );
@@ -30,8 +36,19 @@ if ($year < 2000 || $year > 2100) $year = $thisYear;
 $month = (int)($_GET['month'] ?? 0);
 if ($month < 1 || $month > 12) $month = 0;
 
+// A day is only meaningful within a selected month and year.
+$day = (int)($_GET['day'] ?? 0);
+if ($day !== 0 && (!$month || !checkdate($month, $day, $year))) {
+  json_out(['error' => 'Choose a valid day within the selected month.'], 422);
+}
+
 // Current period and the period it is compared against
-if ($month) {
+if ($day) {
+  $start       = new DateTimeImmutable(sprintf('%d-%02d-%02d', $year, $month, $day), $tz);
+  $end         = $start;
+  $prevStart   = $start->modify('-1 day');
+  $prevFullEnd = $prevStart;
+} elseif ($month) {
   $start       = new DateTimeImmutable(sprintf('%d-%02d-01', $year, $month), $tz);
   $end         = $start->modify('last day of this month');
   $prevStart   = $start->modify('-1 month');
@@ -52,7 +69,9 @@ $prevEnd = min($prevStart->add($start->diff($curEnd)), $prevFullEnd);
 $range     = [$start->format('Y-m-d'), $end->format('Y-m-d')];
 $prevRange = [$prevStart->format('Y-m-d'), $prevEnd->format('Y-m-d')];
 
-if ($month) {
+if ($day) {
+  $compareLabel = 'vs ' . $prevStart->format('M j, Y');
+} elseif ($month) {
   $compareLabel = $partial
     ? 'vs ' . $prevStart->format('M j') . '-' . $prevEnd->format('j, Y')
     : 'vs ' . $prevStart->format('F Y');
@@ -73,8 +92,8 @@ if (!in_array($thisYear, $years, true)) {
 }
 
 // Totals (current + previous period)
-$out  = fp_period_totals($pdo, $vol, $range);
-$out['prev'] = fp_period_totals($pdo, $vol, $prevRange);
+$out  = fp_period_totals($pdo, $vol, $speciesGroup, $range);
+$out['prev'] = fp_period_totals($pdo, $vol, $speciesGroup, $prevRange);
 
 // The record coverage range explains a new comparison period when the
 // previous period has no records.
@@ -106,7 +125,8 @@ $st = $pdo->prepare(
       COALESCE(SUM(CASE WHEN truck_delivery = 1 THEN total_value ELSE 0 END), 0) AS value_land,
       COALESCE(SUM(CASE WHEN truck_delivery <> 1 OR truck_delivery IS NULL THEN total_value ELSE 0 END), 0) AS value_sea,
       COALESCE(SUM(CASE WHEN truck_delivery = 1 THEN $vol ELSE 0 END), 0) AS weight_land,
-      COALESCE(SUM(CASE WHEN truck_delivery <> 1 OR truck_delivery IS NULL THEN $vol ELSE 0 END), 0) AS weight_sea
+      COALESCE(SUM(CASE WHEN truck_delivery <> 1 OR truck_delivery IS NULL THEN $vol ELSE 0 END), 0) AS weight_sea,
+      COUNT(DISTINCT landing_date) AS active_days
    FROM fp_landings
    WHERE status <> 'rejected' AND landing_date BETWEEN ? AND ?"
 );
@@ -124,17 +144,28 @@ $out['by_route'] = [
     'weight'   => (float)($route['weight_sea'] ?? 0),
   ],
 ];
-$out['period_days'] = $start->diff($end)->days + 1;
+$out['active_days'] = (int)($route['active_days'] ?? 0);
 
 // Volume by species (all species)
 $st = $pdo->prepare(
-  "SELECT species, SUM($vol) AS volume
+  "SELECT $speciesGroup AS species, SUM($vol) AS volume
    FROM fp_landings
    WHERE status <> 'rejected' AND landing_date BETWEEN ? AND ?
-   GROUP BY species ORDER BY volume DESC"
+   GROUP BY $speciesGroup ORDER BY volume DESC"
 );
 $st->execute($range);
 $out['by_species'] = $st->fetchAll();
+
+// Individual shrimp names are only shown when the HIPON group is opened.
+$st = $pdo->prepare(
+  "SELECT UPPER(TRIM(species)) AS species, SUM($vol) AS volume
+   FROM fp_landings
+   WHERE status <> 'rejected' AND landing_date BETWEEN ? AND ?
+     AND ($speciesGroup) = 'HIPON'
+   GROUP BY UPPER(TRIM(species)) ORDER BY volume DESC"
+);
+$st->execute($range);
+$out['hipon_species'] = $st->fetchAll();
 
 // Month-by-month totals for the whole selected year (chart, sparklines, month chips)
 $st = $pdo->prepare(
@@ -170,6 +201,7 @@ $out['recent'] = $st->fetchAll();
 
 $out['year']          = $year;
 $out['month']         = $month;
+$out['day']           = $day;
 $out['compare_label'] = $compareLabel;
 $out['years']         = $years;
 
