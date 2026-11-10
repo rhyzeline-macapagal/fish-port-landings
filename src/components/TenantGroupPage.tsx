@@ -34,6 +34,7 @@ import Modal from "@/components/Modal";
 import AnimatedSelect from "@/components/AnimatedSelect";
 import ExportMenu, { type ExportKind } from "@/components/ExportMenu";
 import { ghostBtn, inputCls, primaryBtn } from "@/components/ui";
+import FishLoader from "@/components/FishLoader";
 
 type Size = "small" | "big";
 type Status = "active" | "inactive";
@@ -623,6 +624,7 @@ export default function TenantGroupPage({ group }: { group: TenantGroup }) {
 
   return (
     <div className="space-y-5">
+      {loading && <FishLoader overlay label="Loading FishPort tenants" />}
       <section className="rounded-xl bg-[#12344d] p-5 text-white sm:p-6">
         <nav aria-label="Breadcrumb" className="mb-4">
           <ol className="flex min-w-0 items-center gap-2 text-xs text-slate-300">

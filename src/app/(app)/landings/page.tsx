@@ -16,6 +16,7 @@ import AnimatedSelect from "@/components/AnimatedSelect";
 import { ghostBtn, inputCls, primaryBtn } from "@/components/ui";
 import type { Col, ExportCell, Report } from "@/lib/export";
 import ExportMenu, { type ExportKind } from "@/components/ExportMenu";
+import FishLoader from "@/components/FishLoader";
 
 /* Same simple look as the dashboard: solid colours, thin borders, no blur layers, no gradients. */
 const card = "surface-glass rounded-xl border border-slate-200";
@@ -1342,6 +1343,7 @@ export default function LandingsPage() {
 
   return (
     <div className="flex flex-col gap-5">
+      {loading && rows.length === 0 && <FishLoader overlay label="Loading landing records" />}
       <section className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[#0875d1]">Landing operations</p>

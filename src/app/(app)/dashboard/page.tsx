@@ -3,7 +3,7 @@
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import {
-  Wallet, Clock, Plus, Fish, Ship, Truck, X, LoaderCircle,
+  Wallet, Clock, Plus, Fish, Ship, Truck, X,
 } from "lucide-react";
 import { api, formatDate, formatKg, formatPeso, Landing } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
@@ -14,6 +14,7 @@ import ExportMenu, { type ExportKind } from "@/components/ExportMenu";
 import AnimatedSelect from "@/components/AnimatedSelect";
 import type { Report } from "@/lib/export"; // type only: the export library itself loads on demand
 import { formatSpeciesName, groupSpeciesVolumes, speciesClassification } from "@/lib/species";
+import FishLoader from "@/components/FishLoader";
 
 /* ------------------------------------------------------------------ */
 /* Performance notes                                                   */
@@ -78,6 +79,7 @@ interface DashboardData {
     sea: { landings: number | string; value: number | string; weight: number | string };
   };
   period_days: number | string;
+  active_days: number | string;
 }
 
 type SpeciesReference = {
@@ -534,8 +536,8 @@ export default function DashboardPage() {
     value: routeNumber(data?.by_route?.sea, "value"),
     weight: routeNumber(data?.by_route?.sea, "weight"),
   };
-  const periodDays = Math.max(1, num(data?.period_days));
-  const averageDaily = (value: number) => value / periodDays;
+  const activeDays = Math.max(1, num(data?.active_days));
+  const averageDaily = (value: number) => value / activeDays;
 
   function changeMonth(value: string) {
     setMonth(value);
@@ -651,13 +653,14 @@ export default function DashboardPage() {
 
   return (
     <div className="space-y-5" aria-busy={fetching}>
+      {loading && !data && !error && <FishLoader overlay label="Loading dashboard data" />}
       <section className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
             <h2 className="text-xl font-semibold tracking-tight text-[#14263d] sm:text-2xl">{greeting}, {firstName}!</h2>
-            {fetching && data && <LoaderCircle size={16} className="animate-spin text-[#1a8cc7]" aria-label="Updating dashboard" />}
           </div>
           <p className="mt-1 text-sm text-slate-500">Here&apos;s what&apos;s happening at Mercedes FishPort today.</p>
+          {fetching && data && <FishLoader overlay label="Updating dashboard data" />}
         </div>
 
         <div className="flex min-w-0 flex-col gap-3 xl:items-end">
@@ -815,7 +818,7 @@ export default function DashboardPage() {
       </section>
 
       <section aria-label="Average daily landing value">
-        <CardHeader title="Average Daily Landing Value" subtitle={`Based on ${periodDays.toLocaleString()} calendar ${periodDays === 1 ? "day" : "days"} in ${periodLabel}`} />
+        <CardHeader title="Average Daily Landing Value" subtitle={`Based on ${num(data?.active_days).toLocaleString()} ${num(data?.active_days) === 1 ? "day" : "days"} with landings in ${periodLabel}`} />
         <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3 lg:gap-4">
           <KpiCard
             label="Average Daily Value - Combined"

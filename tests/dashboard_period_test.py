@@ -77,6 +77,7 @@ require $argv[1];
         self.assertEqual(data["by_route"]["land"]["value"], 1000)
         self.assertEqual(data["by_route"]["sea"]["value"], 2000)
         self.assertEqual(data["period_days"], 1)
+        self.assertEqual(data["active_days"], 1)
         self.assertEqual(data["prev"]["total_value"], 200)
         self.assertEqual(data["compare_label"], "vs Jan 31, 2024")
         self.assertEqual(data["day"], 1)
@@ -95,6 +96,7 @@ require $argv[1];
         empty = self.request(month=2, day=3)["data"]
         self.assertEqual(empty["total_value"], 0)
         self.assertEqual(empty["period_days"], 1)
+        self.assertEqual(empty["active_days"], 0)
         self.assertEqual(empty["by_species"], [])
         self.assertEqual(empty["recent"], [])
 
@@ -105,13 +107,15 @@ require $argv[1];
         self.assertEqual(leap["total_value"], 500)
         self.assertEqual(leap["compare_label"], "vs Feb 28, 2024")
 
-    def test_month_and_year_filters_keep_calendar_day_divisors(self):
+    def test_month_and_year_filters_count_only_days_with_landings(self):
         month = self.request(month=2)["data"]
         self.assertEqual(month["period_days"], 29)
+        self.assertEqual(month["active_days"], 3)
         self.assertEqual(month["total_value"], 8500)
         self.assertEqual(month["day"], 0)
         year = self.request()["data"]
         self.assertEqual(year["period_days"], 366)
+        self.assertEqual(year["active_days"], 6)
         self.assertEqual(year["total_value"], 9700)
 
     def test_invalid_dates_are_rejected(self):

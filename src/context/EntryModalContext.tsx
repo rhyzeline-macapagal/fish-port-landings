@@ -2,16 +2,13 @@
 
 import dynamic from "next/dynamic";
 import { createContext, ReactNode, useCallback, useContext, useMemo, useState } from "react";
+import FishLoader from "@/components/FishLoader";
 
 export type AppNotification = { id: number; message: string; actor: string; at: number; archiveId?: number };
 
 const NewLandingModal = dynamic(() => import("@/components/NewLandingModal"), {
   loading: () => (
-    <div className="fixed inset-0 z-[10000] grid place-items-center bg-[#0b2233]/55 p-4" role="status" aria-live="polite">
-      <div className="rounded-xl border border-slate-200 bg-white px-5 py-4 text-sm font-medium text-slate-700 shadow-xl">
-        Loading landing form…
-      </div>
-    </div>
+    <FishLoader overlay label="Loading landing form" />
   ),
 });
 

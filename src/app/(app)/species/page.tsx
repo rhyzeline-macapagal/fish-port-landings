@@ -8,6 +8,7 @@ import ExportMenu, { type ExportKind } from "@/components/ExportMenu";
 import Modal from "@/components/Modal";
 import { useAuth } from "@/context/AuthContext";
 import { useEntryModal } from "@/context/EntryModalContext";
+import FishLoader from "@/components/FishLoader";
 
 type SpeciesRecord = {
   id?: number | string;
@@ -170,6 +171,7 @@ export default function SpeciesPage() {
 
   return (
     <div className="space-y-5">
+      {loading && <FishLoader overlay label="Loading species data" />}
       <section className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[#0875d1]">FishPort reference data</p>

@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
 import { EntryModalProvider } from "@/context/EntryModalContext";
 import AppShell from "@/components/AppShell";
+import FishLoader from "@/components/FishLoader";
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
@@ -18,7 +19,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   }, [loading, user, blocked, router]);
 
   if (loading || !user || blocked) {
-    return <div className="grid min-h-screen place-items-center bg-[#f5f8fc] text-sm font-medium text-slate-600">Loading...</div>;
+    return <FishLoader />;
   }
 
   return (

@@ -125,14 +125,21 @@ if ($method === 'GET') {
   $limit = min(5000, max(1, (int)($_GET['limit'] ?? 50)));
   $offset = ($page - 1) * $limit;
 
-  $count = db()->prepare("SELECT COUNT(*) FROM fp_parking_collections p WHERE $where");
+  $count = db()->prepare("SELECT COUNT(DISTINCT p.collection_date) FROM fp_parking_collections p WHERE $where");
   $count->execute($params);
   $totalRows = (int)$count->fetchColumn();
 
-  $columns = parking_select_columns();
   $records = db()->prepare(
-    "SELECT $columns FROM fp_parking_collections p
-     WHERE $where ORDER BY p.collection_date DESC, p.id DESC LIMIT $limit OFFSET $offset"
+    "SELECT MIN(p.id) AS id, p.collection_date,
+            SUM(p.total_collection) AS total_collection,
+            NULLIF(GROUP_CONCAT(NULLIF(TRIM(p.remarks), '') SEPARATOR ' | '), '') AS remarks,
+            MIN(p.created_at) AS created_at,
+            COUNT(*) AS entry_count
+     FROM fp_parking_collections p
+     WHERE $where
+     GROUP BY p.collection_date
+     ORDER BY p.collection_date DESC
+     LIMIT $limit OFFSET $offset"
   );
   $records->execute($params);
 

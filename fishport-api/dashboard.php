@@ -144,6 +144,7 @@ $out['by_route'] = [
     'weight'   => (float)($route['weight_sea'] ?? 0),
   ],
 ];
+$out['period_days'] = $start->diff($end)->days + 1;
 $out['active_days'] = (int)($route['active_days'] ?? 0);
 
 // Volume by species (all species)

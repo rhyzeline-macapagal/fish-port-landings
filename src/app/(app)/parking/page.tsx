@@ -13,6 +13,7 @@ import ExportMenu, { type ExportKind } from "@/components/ExportMenu";
 import KpiCard from "@/components/KpiCard";
 import type { Report } from "@/lib/export";
 import { ghostBtn, inputCls, primaryBtn } from "@/components/ui";
+import FishLoader from "@/components/FishLoader";
 
 type ParkingRecord = {
   id: number;
@@ -20,6 +21,7 @@ type ParkingRecord = {
   total_collection: number | string;
   remarks: string | null;
   created_at: string;
+  entry_count?: number | string;
 };
 type MonthRow = { month: number; collection: number | string };
 type DayRow = { date: string; collection: number | string };
@@ -263,6 +265,7 @@ export default function ParkingPage() {
   }
   return (
     <div className="space-y-5">
+      {loading && !data && <FishLoader overlay label="Loading parking collections" />}
       <section className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
         <div><p className="text-xs font-semibold uppercase tracking-[0.16em] text-[#0875d1]">Revenue operations</p><h1 className="mt-1 text-2xl font-semibold tracking-tight text-[#14263d] sm:text-[28px]">Parking Collection</h1><p className="mt-1 text-sm text-slate-500">Track daily collection totals, remarks and annual performance.</p></div>
         <div className="flex flex-wrap items-center gap-2">
@@ -301,11 +304,11 @@ export default function ParkingPage() {
         <div className="flex shrink-0 items-center justify-between gap-4 border-b border-slate-200 bg-slate-50 px-4 py-3"><div className="flex items-center gap-2.5"><span className="grid h-8 w-8 place-items-center rounded-lg bg-sky-50 text-[#0875d1]"><ReceiptText size={17} /></span><div><h2 className="font-semibold text-slate-900">Collection records</h2><p className="text-xs text-slate-500">{data?.total ?? 0} matching entries</p></div></div>{loading && <Loader2 size={18} className="animate-spin text-[#0875d1]" />}</div>
         {!loading && !(data?.records.length) ? <div className="grid flex-1 place-items-center p-6 text-center"><div><span className="mx-auto grid h-10 w-10 place-items-center rounded-lg bg-slate-100 text-slate-500"><ReceiptText size={20} /></span><p className="mt-3 font-medium text-slate-900">No parking collections found</p><p className="mt-1 text-sm text-slate-500">Change the filters or add a collection.</p></div></div> : <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
           <ul className="divide-y divide-slate-100 md:hidden">{(data?.records ?? []).map((record) => <li key={record.id} className="space-y-2 p-4">
-              <div className="flex items-start justify-between gap-3"><div className="min-w-0"><p className="font-semibold text-slate-900">{formatDate(record.collection_date)}</p><p className="mt-1 break-words text-xs text-slate-500">{record.remarks || "No remarks"}</p></div><div className="flex items-center gap-2"><span className="font-semibold tabular-nums text-slate-900">{formatPeso(record.total_collection)}</span><ActionMenu record={record} canEdit={canEdit} canDelete={canDelete} onView={() => openRecord(record, true)} onEdit={() => openRecord(record, false)} onDelete={() => setDeleting(record)} /></div></div>
+              <div className="flex items-start justify-between gap-3"><div className="min-w-0"><p className="font-semibold text-slate-900">{formatDate(record.collection_date)}</p><p className="mt-1 break-words text-xs text-slate-500">{record.remarks || "No remarks"}</p></div><div className="flex items-center gap-2"><span className="font-semibold tabular-nums text-slate-900">{formatPeso(record.total_collection)}</span>{record.entry_count && Number(record.entry_count) > 1 ? <span className="text-xs font-medium text-slate-400">Combined</span> : <ActionMenu record={record} canEdit={canEdit} canDelete={canDelete} onView={() => openRecord(record, true)} onEdit={() => openRecord(record, false)} onDelete={() => setDeleting(record)} />}</div></div>
             </li>)}</ul>
           <div className="hidden overflow-x-auto md:block"><table className="w-full text-left text-sm">
             <thead className="sticky top-0 z-10 bg-slate-50 text-xs text-slate-600 shadow-[0_1px_0_#e2e8f0]"><tr><th className="px-4 py-3 font-semibold">Collection date</th><th className="px-4 py-3 text-right font-semibold">Total collection</th><th className="px-4 py-3 font-semibold">Remarks</th><th className="px-4 py-3 text-right font-semibold">Actions</th></tr></thead>
-            <tbody className="divide-y divide-slate-100">{(data?.records ?? []).map((record) => <tr key={record.id} className="hover:bg-slate-50"><td className="whitespace-nowrap px-4 py-3.5 text-slate-700">{formatDate(record.collection_date)}</td><td className="whitespace-nowrap px-4 py-3.5 text-right font-semibold tabular-nums text-slate-900">{formatPeso(record.total_collection)}</td><td className="max-w-md px-4 py-3.5 text-slate-700">{record.remarks || "—"}</td><td className="px-4 py-3.5 text-right"><ActionMenu record={record} canEdit={canEdit} canDelete={canDelete} onView={() => openRecord(record, true)} onEdit={() => openRecord(record, false)} onDelete={() => setDeleting(record)} /></td></tr>)}</tbody>
+            <tbody className="divide-y divide-slate-100">{(data?.records ?? []).map((record) => <tr key={record.id} className="hover:bg-slate-50"><td className="whitespace-nowrap px-4 py-3.5 text-slate-700">{formatDate(record.collection_date)}</td><td className="whitespace-nowrap px-4 py-3.5 text-right font-semibold tabular-nums text-slate-900">{formatPeso(record.total_collection)}</td><td className="max-w-md px-4 py-3.5 text-slate-700">{record.remarks || "—"}</td><td className="px-4 py-3.5 text-right">{record.entry_count && Number(record.entry_count) > 1 ? <span className="text-xs font-medium text-slate-400">Combined</span> : <ActionMenu record={record} canEdit={canEdit} canDelete={canDelete} onView={() => openRecord(record, true)} onEdit={() => openRecord(record, false)} onDelete={() => setDeleting(record)} />}</td></tr>)}</tbody>
           </table></div>
         </div>}
         <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-t border-slate-200 bg-white px-4 py-3 text-xs text-slate-600"><div className="flex items-center gap-2"><span>Page {page} of {pages}</span><select aria-label="Rows per page" value={pageSize} onChange={(event) => { setPageSize(Number(event.target.value)); setPage(1); setLoading(true); }} className="rounded-md border border-slate-200 bg-white px-2 py-1.5 text-xs">{[25, 50, 100].map((size) => <option key={size} value={size}>{size} rows</option>)}</select></div><div className="flex items-center gap-2"><button type="button" aria-label="Previous page" className="grid h-8 w-8 place-items-center rounded-md border border-slate-200 hover:bg-slate-50 disabled:opacity-40" disabled={page <= 1} onClick={() => { setLoading(true); setPage((current) => current - 1); }}><ChevronLeft size={15} /></button><button type="button" aria-label="Next page" className="grid h-8 w-8 place-items-center rounded-md border border-slate-200 hover:bg-slate-50 disabled:opacity-40" disabled={page >= pages} onClick={() => { setLoading(true); setPage((current) => current + 1); }}><ChevronRight size={15} /></button></div></div>

@@ -25,9 +25,9 @@ import TenantNavigation from "@/components/TenantNavigation";
 const NAV: { href: string; label: string; short: string; icon: LucideIcon; roles: Role[] }[] = [
   { href: "/dashboard", label: "Dashboard", short: "Home", icon: LayoutDashboard, roles: ["admin", "encoder", "viewer"] },
   { href: "/landings", label: "Landings", short: "Landings", icon: ClipboardList, roles: ["admin", "encoder", "viewer"] },
+  { href: "/species", label: "Species", short: "Species", icon: Dna, roles: ["admin", "encoder", "viewer"] },
   { href: "/parking", label: "Parking Collection", short: "Parking", icon: CircleParking, roles: ["admin", "encoder", "viewer"] },
   { href: "/dashboard/tenants", label: "FishPort Tenants", short: "Tenants", icon: Store, roles: ["admin", "encoder", "viewer"] },
-  { href: "/species", label: "Species", short: "Species", icon: Dna, roles: ["admin", "encoder", "viewer"] },
 ];
 
 function Logo({ compact = false }: { compact?: boolean }) {
