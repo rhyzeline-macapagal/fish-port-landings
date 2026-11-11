@@ -274,6 +274,7 @@ export default function SpeciesPage() {
           onClose={() => !saving && setFormOpen(false)}
           closeDisabled={saving}
           maxWidthClassName="max-w-2xl"
+          mobileSheet
         >
           <form onSubmit={saveSpecies} className="space-y-5 p-5 sm:p-6">
             <div className="grid gap-4 sm:grid-cols-2">

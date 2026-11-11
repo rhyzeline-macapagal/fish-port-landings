@@ -584,6 +584,7 @@ export default function NewLandingModal({ onClose, onSaved }: { onClose: () => v
       icon={<Fish size={21} />}
       onClose={onClose}
       maxWidthClassName="max-w-4xl"
+      mobileSheet
     >
       <form onSubmit={onSubmit} noValidate>
         <div className="space-y-3 bg-slate-50/40 px-3 py-4 sm:px-5">
