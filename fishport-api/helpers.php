@@ -21,7 +21,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'OPTIONS') {
 set_exception_handler(function ($e) {
   error_log($e->getMessage());
   http_response_code(500);
-  echo json_encode(['error' => 'Server error']);
+  echo json_encode(['error' => 'DEBUG: ' . $e->getMessage()]); // remove after fixing
 });
 
 function db(): PDO {
