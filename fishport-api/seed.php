@@ -6,7 +6,7 @@ $user = 'pondmate_epesomercedes_user';
 $pass = 'Epeso2026db';
 
 $accounts = [
-  ['Admin User',   'admin2@fishport.local',   'admin',   'fishport2_admin2'],
+  ['Admin',   'admin3@fishport.local',   'admin',   'fishport2026admin'],
 ];
 // -------------------------------------------------------------
 

@@ -171,9 +171,20 @@ function monthBounds(year: number, month: number): [string, string] {
 type PrevRange = { from: string; to: string; label: string };
 
 /* The period right before the one being viewed. Returns null when there is nothing sensible to compare against. */
-function previousRange(f: Filters, month: string): PrevRange | null {
+function previousRange(f: Filters, month: string, day: string): PrevRange | null {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
+
+  // One day -> the previous calendar day.
+  if (month !== "0" && day !== "0" && f.year) {
+    const current = new Date(Number(f.year), Number(month) - 1, Number(day));
+    const previous = addDays(current, -1);
+    return {
+      from: iso(previous),
+      to: iso(previous),
+      label: `vs ${shortDate(previous)}, ${previous.getFullYear()}`,
+    };
+  }
 
   // One month of a year -> previous month (capped at the same day while the month is still running)
   if (month !== "0" && f.year) {
@@ -584,6 +595,7 @@ export default function LandingsPage() {
   const [filters, setFilters] = useState<Filters>(EMPTY);
   const [applied, setApplied] = useState<Filters>(EMPTY);
   const [month, setMonth] = useState("0"); // "0" = whole year / no month filter
+  const [day, setDay] = useState("0"); // "0" = all days in the month
   const [rows, setRows] = useState<Landing[]>([]);
   const [prev, setPrev] = useState<{ label: string; stats: ReturnType<typeof normalizedSummary> } | null>(null);
   const prevReq = useRef(0);
@@ -666,9 +678,9 @@ export default function LandingsPage() {
   }
 
   // Loads the previous period (same filters, different dates) for the "x% higher / lower" pills
-  async function loadPrev(f: Filters, m: string) {
+  async function loadPrev(f: Filters, m: string, d: string) {
     const id = ++prevReq.current;
-    const range = previousRange(f, m);
+    const range = previousRange(f, m, d);
     if (!range) {
       setPrev(null);
       return;
@@ -696,7 +708,7 @@ export default function LandingsPage() {
 
   // Loads the card totals straight from the database, so they match the dashboard
   // no matter how many rows the list itself managed to load.
-  async function loadTotals(f: Filters, m: string) {
+  async function loadTotals(f: Filters, m: string, d: string) {
     const id = ++totalsReq.current;
     try {
       const hasExtraFilters = Object.entries(f).some(([key, value]) =>
@@ -707,8 +719,9 @@ export default function LandingsPage() {
       );
       if (isDashboardScope) {
         const monthParam = m && m !== "0" ? `&month=${m}` : "&month=0";
+        const dayParam = d && d !== "0" ? `&day=${d}` : "&day=0";
         const dashboard = await api<{ total_landings: number | string; total_volume: number | string; total_value: number | string }>(
-          `dashboard.php?year=${encodeURIComponent(f.year || THIS_YEAR)}${monthParam}`
+          `dashboard.php?year=${encodeURIComponent(f.year || THIS_YEAR)}${monthParam}${dayParam}`
         );
         if (id !== totalsReq.current) return;
         setTotals({
@@ -765,6 +778,7 @@ export default function LandingsPage() {
     return [
       applied.year ? `Year: ${applied.year}` : "All years",
       ...(month !== "0" ? [`Month: ${MONTHS[Number(month) - 1]}`] : []),
+      ...(month !== "0" && day !== "0" ? [`Day: ${day}`] : []),
       ...activeChips.map(([k, v]) => `${FILTER_LABELS[k] ?? k}: ${chipText(k, v)}`),
       `Exported ${exportedAt}`,
     ].join("  |  ");
@@ -853,8 +867,8 @@ export default function LandingsPage() {
 
       if (scope === "shown") {
         list = sortedRows;
-        label = month !== "0" ? `${MONTHS[Number(month) - 1]} ${applied.year}` : applied.year || "All years";
-        slug = `current-view_${applied.year || "all-years"}${month !== "0" ? "_" + pad(Number(month)) : ""}`;
+        label = periodLabel;
+        slug = `current-view_${applied.year || "all-years"}${month !== "0" ? "_" + pad(Number(month)) : ""}${day !== "0" ? "_" + pad(Number(day)) : ""}`;
         subtitle = filterSummary(stamp());
         skipRejected = applied.status === "";
       } else {
@@ -928,7 +942,7 @@ export default function LandingsPage() {
       if (gxScope === "view") {
         // Exactly what the card lists, narrowed to the chosen supplier / owner / plate
         list = gxList;
-        period = month !== "0" ? `${MONTHS[Number(month) - 1]} ${applied.year}` : applied.year || "All years";
+        period = periodLabel;
         skipRejected = applied.status !== "rejected";
       } else {
         // Ignores the page filters, so a full history can be exported
@@ -968,7 +982,7 @@ export default function LandingsPage() {
     }
   }
 
-  async function load(f: Filters = filters, m: string = month) {
+  async function load(f: Filters = filters, m: string = month, d: string = day) {
     const id = ++listReq.current;
     listAbort.current?.abort();
     const controller = new AbortController();
@@ -1005,8 +1019,8 @@ export default function LandingsPage() {
       setTotals(null);
     } else {
       loadTop(f);
-      loadPrev(f, m);
-      loadTotals(f, m);
+      loadPrev(f, m, d);
+      loadTotals(f, m, d);
     }
     try {
       const params: Record<string, string> = Object.fromEntries(buildQs(f));
@@ -1179,13 +1193,14 @@ export default function LandingsPage() {
 
   // Filters apply immediately; free-text search waits briefly for typing to pause.
   // `m` is the month filter that goes with this change (defaults to the current one).
-  function apply(patch: Partial<Filters>, m: string = month) {
+  function apply(patch: Partial<Filters>, m: string = month, d: string = day) {
     if (searchTimer.current) clearTimeout(searchTimer.current);
     const next = { ...filters, ...patch };
     setFilters(next);
     setMonth(m);
+    setDay(d);
     setRecordPage(1);
-    load(next, m);
+    load(next, m, d);
   }
 
   function search(value: string) {
@@ -1195,46 +1210,51 @@ export default function LandingsPage() {
     setRecordPage(1);
     const query = { ...next, q: value.trim() };
     if (!query.q) {
-      load(query, month);
+      load(query, month, day);
       return;
     }
-    searchTimer.current = setTimeout(() => load(query, month), 300);
+    searchTimer.current = setTimeout(() => load(query, month, day), 300);
   }
 
   function changeDate(key: "from" | "to", value: string) {
     // A custom date range can span years and replaces the year/month shortcut.
-    apply({ [key]: value, year: "", period: "" }, "0");
+    apply({ [key]: value, year: "", period: "" }, "0", "0");
   }
 
   // Month chips: a month is just a from/to date range inside the selected year.
   function selectMonth(v: string) {
     if (v === "0") {
-      apply({ from: "", to: "" }, "0");
+      apply({ from: "", to: "" }, "0", "0");
       return;
     }
     const y = filters.year || THIS_YEAR;
     const [from, to] = monthBounds(Number(y), Number(v));
-    apply({ year: y, period: "", from, to }, v);
+    apply({ year: y, period: "", from, to }, v, "0");
+  }
+
+  function selectDay(v: string) {
+    if (month === "0") return;
+    if (v === "0") {
+      const [from, to] = monthBounds(Number(filters.year || THIS_YEAR), Number(month));
+      apply({ year: filters.year || THIS_YEAR, period: "", from, to }, month, "0");
+      return;
+    }
+    const date = `${filters.year || THIS_YEAR}-${pad(Number(month))}-${pad(Number(v))}`;
+    apply({ year: filters.year || THIS_YEAR, period: "", from: date, to: date }, month, v);
   }
 
   function changeYear(y: string) {
     if (month !== "0" && y) {
       const [from, to] = monthBounds(Number(y), Number(month));
-      apply({ year: y, period: "", from, to });
+      apply({ year: y, period: "", from, to }, month, "0");
     } else {
-      apply({ year: y, period: "", from: "", to: "" }, "0");
+      apply({ year: y, period: "", from: "", to: "" }, "0", "0");
     }
   }
 
   function reset() {
     setTableSort(null);
-    apply(EMPTY, "0");
-  }
-
-  // Clears every filter and shows the list of all landings (all years)
-  function showAll() {
-    setTableSort(null);
-    apply({ ...EMPTY, year: "" }, "0");
+    apply(EMPTY, "0", "0");
   }
 
   function changeTop(patch: { group?: string; by?: string; n?: number }) {
@@ -1327,7 +1347,16 @@ export default function LandingsPage() {
   );
   const gxViewCount = gxList.length;
 
-  const periodLabel = month !== "0" ? `${MONTHS[Number(month) - 1]} ${filters.year}` : filters.year || "all years";
+  const periodLabel = month !== "0"
+    ? `${MONTHS[Number(month) - 1]} ${day !== "0" ? `${day}, ` : ""}${filters.year}`
+    : filters.year || "all years";
+  const dayOptions = [
+    { value: "0", label: "All days" },
+    ...Array.from({ length: month !== "0" ? new Date(Number(filters.year || THIS_YEAR), Number(month), 0).getDate() : 0 }, (_, index) => ({
+      value: String(index + 1),
+      label: `Day ${index + 1}`,
+    })),
+  ];
 
   const cardBtn =
     "block h-full w-full min-w-0 rounded-xl text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500";
@@ -1354,7 +1383,7 @@ export default function LandingsPage() {
           </p>
         </div>
 
-        <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:items-center">
+        <div className="grid grid-cols-3 gap-2 sm:flex sm:flex-wrap sm:items-center">
           <AnimatedSelect
             label="Year"
             value={filters.year}
@@ -1379,14 +1408,15 @@ export default function LandingsPage() {
             align="right"
           />
 
-          <button
-            type="button"
-            onClick={showAll}
-            className={`${ghostBtn} w-full sm:w-auto`}
-            title="Clear every filter and show all landings from all years"
-          >
-            Show all
-          </button>
+          <AnimatedSelect
+            label="Day"
+            value={day}
+            onChange={selectDay}
+            options={dayOptions}
+            disabled={month === "0"}
+            className="min-w-0"
+            align="right"
+          />
 
           <ExportMenu
             disabled={loading}
@@ -1590,7 +1620,7 @@ export default function LandingsPage() {
                 key={p.value}
                 onClick={() => {
                   const next = filters.period === p.value ? "" : p.value;
-                  apply({ period: next, year: next ? "" : THIS_YEAR, from: "", to: "" }, "0");
+                  apply({ period: next, year: next ? "" : THIS_YEAR, from: "", to: "" }, "0", "0");
                 }}
                 className={`${pill(filters.period === p.value)} shrink-0`}
               >
