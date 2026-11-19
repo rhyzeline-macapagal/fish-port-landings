@@ -496,11 +496,9 @@ export default function NewLandingModal({ onClose, onSaved }: { onClose: () => v
     const listed = (value: string, options: string[]) => options.some((option) => option.toLowerCase() === clean(value).toLowerCase());
     if (!f.landing_date) return "Choose the landing date.";
     if (!f.truck_delivery && !clean(f.boat_name)) return "Choose or enter the producer for a sea landing.";
-    if (!f.truck_delivery && producerOptions.length > 0 && !listed(f.boat_name, producerOptions)) return "Choose the producer from the dropdown list.";
     if (f.truck_delivery && !clean(f.origin)) return "Enter the origin for a land delivery.";
     if (f.truck_delivery && !clean(f.plate_number)) return "Enter the plate number for a land delivery.";
     if (!clean(f.boat_owner)) return "Choose or enter the registered owner.";
-    if (ownerOptions.length > 0 && !listed(f.boat_owner, ownerOptions)) return "Choose the registered owner from the dropdown list.";
     if (clean(f.broker) && brokerOptions.length > 0 && !listed(f.broker, brokerOptions)) return "Choose the broker from the dropdown list.";
 
     const seen = new Set<string>();
@@ -659,9 +657,9 @@ export default function NewLandingModal({ onClose, onSaved }: { onClose: () => v
                     value={f.boat_name}
                     onChange={(v) => update({ boat_name: v })}
                     options={producerOptions}
-                    allowNew={false}
-                    placeholder="Choose a producer"
-                    emptyText={namesLoading ? "Loading producers..." : "No matching producer found in the landings."}
+                    allowNew
+                    placeholder="Choose or type a producer"
+                    emptyText={namesLoading ? "Loading producers..." : "Type a producer name."}
                   />
                 </Field>
               )}
@@ -673,9 +671,9 @@ export default function NewLandingModal({ onClose, onSaved }: { onClose: () => v
                   value={f.boat_owner}
                   onChange={(v) => update({ boat_owner: v })}
                   options={ownerOptions}
-                  allowNew={false}
-                  placeholder="Choose a registered owner"
-                  emptyText={namesLoading ? "Loading registered owners..." : "No matching registered owner found in the landings."}
+                  allowNew
+                  placeholder="Choose or type a registered owner"
+                  emptyText={namesLoading ? "Loading registered owners..." : "Type a registered owner name."}
                 />
               </Field>
               {f.truck_delivery ? (

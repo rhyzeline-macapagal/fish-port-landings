@@ -91,6 +91,14 @@ export default function EditLandingModal({ landing, options, onClose, onSaved }:
     () => mergeOptions([], [...saved.brokers, ...options.brokers]),
     [saved.brokers, options.brokers]
   );
+  const producerOptions = useMemo(
+    () => mergeOptions([], [...saved.producers, ...options.vessels]),
+    [saved.producers, options.vessels]
+  );
+  const ownerOptions = useMemo(
+    () => mergeOptions([], [...saved.owners, ...options.owners]),
+    [saved.owners, options.owners]
+  );
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && !busy && onClose();
@@ -133,6 +141,8 @@ export default function EditLandingModal({ landing, options, onClose, onSaved }:
     // Keep the listed spelling when the typed name matches an existing one
     const species = canonical(f.species, speciesOptions);
     const broker = f.broker.trim() ? canonical(f.broker, brokerOptions) : "";
+    const producer = land ? "" : canonical(f.boat_name, producerOptions);
+    const owner = canonical(f.boat_owner, ownerOptions);
 
     setBusy(true);
     try {
@@ -143,7 +153,8 @@ export default function EditLandingModal({ landing, options, onClose, onSaved }:
           id: landing.id,
           ...f,
           // producer (boat name) only applies to sea landings
-          boat_name: land ? "" : f.boat_name.trim(),
+          boat_name: producer,
+          boat_owner: owner,
           species,
           broker,
           volume,
@@ -163,8 +174,8 @@ export default function EditLandingModal({ landing, options, onClose, onSaved }:
             id: landing.id,
             landing_date: f.landing_date,
             landing_time: f.landing_time,
-            boat_name: land ? "" : f.boat_name.trim(),
-            boat_owner: f.boat_owner,
+            boat_name: producer,
+            boat_owner: owner,
             fishing_gear: f.fishing_gear,
             fishing_ground: f.fishing_ground,
             truck_delivery: land ? 1 : 0,
@@ -177,7 +188,12 @@ export default function EditLandingModal({ landing, options, onClose, onSaved }:
       }
 
       // Landing is saved: remember any new species / broker name in the database
-      await Promise.all([saveLookup("species", species), saveLookup("brokers", broker)]);
+      await Promise.all([
+        saveLookup("species", species),
+        saveLookup("brokers", broker),
+        saveLookup("producers", producer),
+        saveLookup("owners", owner),
+      ]);
 
       onSaved();
     } catch (err) {
@@ -254,11 +270,11 @@ export default function EditLandingModal({ landing, options, onClose, onSaved }:
             {/* Producer (boat name) only exists for sea landings */}
             {!land && (
               <Field label="Producer">
-                <input list="el-vessels" className={inputCls} value={f.boat_name} onChange={(e) => set("boat_name", e.target.value)} />
+                <input list="el-vessels" className={inputCls} value={f.boat_name} onChange={(e) => set("boat_name", e.target.value)} placeholder="Choose or type a producer" />
               </Field>
             )}
             <Field label="Registered owner" className={land ? "sm:col-span-2" : ""}>
-              <input list="el-owners" className={inputCls} value={f.boat_owner} onChange={(e) => set("boat_owner", e.target.value)} />
+              <input list="el-owners" className={inputCls} value={f.boat_owner} onChange={(e) => set("boat_owner", e.target.value)} placeholder="Choose or type a registered owner" />
             </Field>
 
             <Field label="Fishing gear">
@@ -324,8 +340,8 @@ export default function EditLandingModal({ landing, options, onClose, onSaved }:
             </Field>
           </div>
 
-          <DataList id="el-vessels" items={options.vessels} />
-          <DataList id="el-owners" items={options.owners} />
+          <DataList id="el-vessels" items={producerOptions} />
+          <DataList id="el-owners" items={ownerOptions} />
           <DataList id="el-gears" items={options.gears} />
           <DataList id="el-grounds" items={options.grounds} />
           <DataList id="el-origins" items={options.origins} />
